@@ -66,7 +66,7 @@ auto BitInputArchive::openArchiveStream(
     bool detectedBySignature = false;
     if ( *mDetectedFormat == BitFormat::Auto ) {
         // Detecting the format of the input file
-        mDetectedFormat = &( detectFormatFromSignature( inStream ) );
+        mDetectedFormat = &detectFormatFromSignature( inStream );
         detectedBySignature = true;
     }
     CMyComPtr< IInArchive > inArchive = mArchiveHandler.library().initInArchive( *mDetectedFormat );
@@ -75,6 +75,19 @@ auto BitInputArchive::openArchiveStream(
 #endif
     // NOTE: CMyComPtr is still needed: if an error occurs, and an exception is thrown,
     // the IInArchive object is deleted automatically.
+
+#ifdef BIT7Z_AUTO_FORMAT
+    if ( mArchiveHandler.format() != BitFormat::Auto )
+#endif
+    {
+        /* The user explicitly requested the format, so executable formats (PE, TE, ELF, Mach-O) must accept
+         * files with data appended after the executable image (e.g., SFX archives), like 7-Zip does. */
+        CMyComPtr< IArchiveAllowTail > allowTail;
+        ( void )inArchive->QueryInterface( bit7z::IID_IArchiveAllowTail, reinterpret_cast< void** >( &allowTail ) );
+        if ( allowTail != nullptr ) {
+            ( void )allowTail->AllowTail( 1 );
+        }
+    }
 
     // Creating open callback for the file
     const auto openCallback = bit7z::make_com< OpenCallback >( mArchiveHandler, name );
@@ -85,7 +98,7 @@ auto BitInputArchive::openArchiveStream(
 #endif
     HRESULT res = [&]() -> HRESULT {
         if ( startOffset == ArchiveStartOffset::FileStart ) {
-            const UInt64 maxCheckStartPosition = 0;
+            constexpr UInt64 maxCheckStartPosition = 0;
             return inArchive->Open( inStream, &maxCheckStartPosition, openCallback );
         }
         return inArchive->Open( inStream, nullptr, openCallback );
@@ -107,7 +120,7 @@ auto BitInputArchive::openArchiveStream(
         /* Opening the file might have changed the current file pointer, so we reset it to the beginning of the file
          * to correctly read the file signature. */
         inStream->Seek( 0, STREAM_SEEK_SET, nullptr );
-        mDetectedFormat = &( detectFormatFromSignature( inStream ) );
+        mDetectedFormat = &detectFormatFromSignature( inStream );
         inArchive = mArchiveHandler.library().initInArchive( *mDetectedFormat );
         res = inArchive->Open( inStream, nullptr, openCallback );
         if ( res == S_OK ) {
@@ -123,14 +136,20 @@ auto BitInputArchive::openArchiveStream(
 
         BitPropVariant errorFlagsProp;
         inArchive->GetArchiveProperty( static_cast< PROPID >( BitProperty::ErrorFlags ), &errorFlagsProp );
-        if ( !errorFlagsProp.isUInt32() ) {
-            return make_hresult_code( res );
+        if ( errorFlagsProp.isUInt32() ) {
+            const auto errorFlags = errorFlagsProp.getUInt32();
+            if ( errorFlags != 0 ) {
+                return make_open_error_code( errorFlags );
+            }
         }
-        const auto errorFlags = errorFlagsProp.getUInt32();
-        if ( errorFlags == 0 ) {
-            return make_hresult_code( res );
+        if ( res == S_FALSE ) {
+            // 7-Zip reported no specific error flags. A S_FALSE result means the handler couldn't
+            // open the stream as the requested format (wrong format, or corrupted/truncated data)
+            // but set no flag (e.g., the Pe handler rejecting trailing data). We report it as IsNotArc
+            // instead of the opaque raw HRESULT (S_FALSE == 1).
+            return make_error_code( OpenError::IsNotArc );
         }
-        return make_open_error_code( errorFlags );
+        return make_hresult_code( res );
     }();
     throw BitException( "Could not open the archive", error, pathToTstring( name ) );
 }
@@ -196,18 +215,16 @@ BitInputArchive::BitInputArchive( const BitAbstractArchiveHandler& handler, cons
     mInArchive = arc.Detach();
 }
 
-BitInputArchive::BitInputArchive( const BitAbstractArchiveHandler& handler, const BitInputArchive& parentArchive )
-    : BitInputArchive{ handler, parentArchive, parentArchive.mainSubfileIndex() } {}
-
 BitInputArchive::BitInputArchive(
     const BitAbstractArchiveHandler& handler,
     const BitInputArchive& parentArchive,
-    std::uint32_t index
+    std::uint32_t subfileIndex,
+    ArchiveStartOffset archiveStart
 ) : mDetectedFormat{ &handler.format() },
     mArchiveHandler{ handler },
-    mArchivePath{ parentArchive.itemAt( index ).path() } {
-    const CMyComPtr< IInStream > subStream = parentArchive.getSubfileStream( index );
-    mInArchive = openArchiveStream( fs::path{}, subStream, ArchiveStartOffset::FileStart );
+    mArchivePath{ parentArchive.itemAt( subfileIndex ).path() } {
+    const CMyComPtr< IInStream > subStream = parentArchive.getSubfileStream( subfileIndex );
+    mInArchive = openArchiveStream( fs::path{}, subStream, archiveStart );
 }
 
 auto BitInputArchive::archiveProperty( BitProperty property ) const -> BitPropVariant {
@@ -473,14 +490,54 @@ void BitInputArchive::extractTo( const tstring& outDir, RenameCallback renameCal
     extractArchive( callback, NAskMode::kExtract );
 }
 
+void BitInputArchive::extractTo( const tstring& outDir, LegacyRenameCallback renameCallback ) const {
+    // Adapt the deprecated (index, path) callback to the item-based RenameCallback.
+    extractTo( outDir, [ legacyCallback = std::move( renameCallback ) ] ( const BitArchiveItem& item ) -> tstring {
+        return legacyCallback( item.index(), item.path() );
+    } );
+}
+
 namespace {
 constexpr auto nativeDot = BIT7Z_NATIVE_STRING( "." );
 
 BIT7Z_ALWAYS_INLINE
-auto shouldFilterItem( const native_string& path, const BitArchiveItemOffset& item, FolderPathPolicy policy ) -> bool {
+auto shouldFilterItem( const native_string& path, const BitArchiveItem& item, FolderPathPolicy policy ) -> bool {
     constexpr auto nativeDotDot = BIT7Z_NATIVE_STRING( ".." );
     return ( starts_with( path, nativeDotDot ) ||
              ( ( path.empty() || path == nativeDot ) && ( policy == FolderPathPolicy::Strip || !item.isDir() ) ) );
+}
+
+// Computes the destination path (relative to the output directory) for an item being extracted
+// from the folder at folderFsPath, or an empty path if the item must be skipped.
+// The FolderPathPolicy shapes the prefix (the selected folder's own path); when directories must
+// not be retained, the remainder (the part below the folder) is flattened to its filename.
+auto folderItemDestination(
+    const BitArchiveItem& item,
+    const fs::path& folderFsPath,
+    const fs::path& folderName,
+    FolderPathPolicy policy,
+    bool retainDirs
+) -> fs::path {
+    fs::path itemPath{ item.nativePath() };
+    const fs::path relativePath = itemPath.lexically_relative( folderFsPath );
+    if ( shouldFilterItem( relativePath.native(), item, policy ) ) {
+        return {}; // Skipping the item.
+    }
+
+    const bool flattenRemainder = !retainDirs && relativePath.native() != nativeDot;
+    fs::path remainder = flattenRemainder ? relativePath.filename() : relativePath;
+    switch ( policy ) {
+        case FolderPathPolicy::KeepPath:
+            if ( flattenRemainder ) {
+                return folderFsPath / remainder;
+            }
+            return itemPath; // Separate return (not a ternary) to allow moving itemPath.
+        case FolderPathPolicy::KeepName:
+            return relativePath.native() == nativeDot ? folderName : folderName / remainder;
+        case FolderPathPolicy::Strip:
+        default:
+            return remainder;
+    }
 }
 } // namespace
 
@@ -503,31 +560,21 @@ void BitInputArchive::extractFolderTo(
         );
     }
 
-    std::uint32_t matchingCount = 0;
     const auto folderFsPath = tstringToPath( folderPath );
     const auto folderName = isPathSeparator( folderPath.back() )
                                 ? folderFsPath.parent_path().filename()
                                 : folderFsPath.filename();
-    auto renameCallback = [ & ] ( std::uint32_t index, const tstring& path ) -> tstring {
-        // Note: we use the native item's path rather than the second parameter of the callback
-        // to avoid unnecessary string conversions when creating the filesystem path object.
-        const auto item = itemAt( index );
-        const fs::path relativePath = fs::path{ item.nativePath() }.lexically_relative( folderFsPath );
-        if ( shouldFilterItem( relativePath.native(), item, policy ) ) {
+    const bool retainDirs = handler().retainDirectories();
+
+    std::uint32_t matchingCount = 0;
+    auto renameCallback =
+        [ &folderFsPath, &folderName, &policy, &retainDirs, &matchingCount ] ( const BitArchiveItem& item ) -> tstring {
+        const auto destination = folderItemDestination( item, folderFsPath, folderName, policy, retainDirs );
+        if ( destination.empty() ) {
             return {}; // Skipping the item.
         }
-
         ++matchingCount;
-        if ( policy == FolderPathPolicy::KeepPath ) {
-            return path;
-        }
-        if ( policy == FolderPathPolicy::Strip ) {
-            return pathToTstring( relativePath );
-        }
-        if ( relativePath.native() == nativeDot ) {
-            return pathToTstring( folderName );
-        }
-        return pathToTstring( folderName / relativePath );
+        return pathToTstring( destination );
     };
     const auto callback = bit7z::make_com< FileExtractCallback, ExtractCallback >(
         *this,
@@ -542,6 +589,46 @@ void BitInputArchive::extractFolderTo(
             std::make_error_code( std::errc::invalid_argument )
         );
     }
+}
+
+void BitInputArchive::extractRootFolderContentTo( const tstring& outDir ) const {
+    const auto folderPath = rootFolder();
+    if ( folderPath.empty() ) {
+        throw BitException(
+            "The archive does not have a single root folder",
+            make_error_code( BitError::NoMatchingItems )
+        );
+    }
+
+    // Note: if we are here, it means that all the items in the archive have the same root folder prefix.
+    // So we can simply strip it from the path to obtain the path of the item within the root folder.
+    const auto stripDirs = !handler().retainDirectories();
+    const auto rootPrefixLength = folderPath.length();
+    auto renameCallback = [ stripDirs, rootPrefixLength ]( const BitArchiveItem& item ) -> tstring {
+        auto originalItemPath = item.path();
+        if ( originalItemPath.length() <= rootPrefixLength ) {
+            // Should not happen, but better be safe.
+            return {};
+        }
+
+        // The returned string starts just after the root prefix and any separators following it.
+        auto startPos = originalItemPath.find_first_not_of( kSeparators, rootPrefixLength );
+        if ( startPos == tstring::npos ) {
+            // No non-separator character after the root prefix (should not happen).
+            return {};
+        }
+
+        if ( stripDirs ) {
+            // Flatten: the basename begins right after the last separator.
+            const auto lastSeparator = originalItemPath.find_last_of( kSeparators );
+            if ( lastSeparator != tstring::npos ) {
+                startPos = lastSeparator + 1;
+            }
+        }
+        originalItemPath.erase( 0, startPos );
+        return originalItemPath;
+    };
+    extractTo( outDir, std::move( renameCallback ) );
 }
 
 void BitInputArchive::extractTo( buffer_t& outBuffer, std::uint32_t index ) const {
@@ -837,6 +924,10 @@ auto BitInputArchive::itemAt( std::uint32_t index ) const -> BitArchiveItemOffse
             make_error_code( BitError::InvalidIndex )
         );
     }
+    return { *this, index };
+}
+
+auto BitInputArchive::itemAtUnchecked( std::uint32_t index ) const -> BitArchiveItemOffset {
     return { *this, index };
 }
 
