@@ -92,8 +92,10 @@ TEMPLATE_TEST_CASE(
         getInputArchive( arcFileName, inputArchive );
         const BitArchiveReader info( test::sevenzipLib(), inputArchive, testArchive.format() );
         if ( is_filesystem_archive< TestType >::value ) {
+            REQUIRE( info.archiveHasPath() );
             REQUIRE( info.archivePath() == arcFileName );
         } else {
+            REQUIRE_FALSE( info.archiveHasPath() );
             REQUIRE( info.archivePath().empty() ); // No archive path for buffer/streamed archives
         }
         REQUIRE_FALSE( info.hasEncryptedItems() );
@@ -136,8 +138,10 @@ TEMPLATE_TEST_CASE(
         getInputArchive( arcFileName, inputArchive );
         const BitArchiveReader info( test::sevenzipLib(), inputArchive, testArchive.format() );
         if ( is_filesystem_archive< TestType >::value ) {
+            REQUIRE( info.archiveHasPath() );
             REQUIRE( info.archivePath() == arcFileName );
         } else {
+            REQUIRE_FALSE( info.archiveHasPath() );
             REQUIRE( info.archivePath().empty() ); // No archive path for buffer/streamed archives
         }
         REQUIRE_FALSE( info.hasEncryptedItems() );
@@ -181,8 +185,10 @@ TEMPLATE_TEST_CASE(
         getInputArchive( arcFileName, inputArchive );
         const BitArchiveReader info( test::sevenzipLib(), inputArchive, testArchive.format() );
         if ( is_filesystem_archive< TestType >::value ) {
+            REQUIRE( info.archiveHasPath() );
             REQUIRE( info.archivePath() == arcFileName );
         } else {
+            REQUIRE_FALSE( info.archiveHasPath() );
             REQUIRE( info.archivePath().empty() ); // No archive path for buffer/streamed archives
         }
         REQUIRE_FALSE( info.hasEncryptedItems() );
@@ -398,8 +404,10 @@ TEMPLATE_TEST_CASE(
         getInputArchive( arcFileName, inputArchive );
         const BitArchiveReader info( test::sevenzipLib(), inputArchive, testArchive.format() );
         if ( is_filesystem_archive< TestType >::value ) {
+            REQUIRE( info.archiveHasPath() );
             REQUIRE( info.archivePath() == arcFileName );
         } else {
+            REQUIRE_FALSE( info.archiveHasPath() );
             REQUIRE( info.archivePath().empty() ); // No archive path for buffer/streamed archives
         }
         REQUIRE_FALSE( info.isEncrypted() );
@@ -537,7 +545,7 @@ void require_item_type(
     REQUIRE( raw == utf16Path ); // UTF-16LE
 
     const auto native = iterator->nativePath();
-#if defined( _WIN32 )
+#ifdef _WIN32
     REQUIRE( native == utf16Path ); // UTF-16LE
 #else
     REQUIRE( native == itemName ); // UTF-8
@@ -868,7 +876,7 @@ TEMPLATE_TEST_CASE(
         getInputArchive( arcFileName, inputArchive );
         const BitArchiveReader info( test::sevenzipLib(), inputArchive, testArchive.format );
 
-        TempTestDirectory testOutDir{ "test_bitarchivereader" };
+        const TempTestDirectory testOutDir{ "test_bitarchivereader" };
         info.extractTo(
             testOutDir,
             [] ( std::uint32_t, const tstring& originalName ) -> tstring {
@@ -891,10 +899,10 @@ TEMPLATE_TEST_CASE(
         REQUIRE_FALSE( fs::exists( folder.name ) );
 
         auto iterator = fs::directory_iterator{ testOutDir.path() };
-        int fileCount = std::count_if(
+        const int fileCount = std::count_if(
             fs::begin( iterator ),
             fs::end( iterator ),
-            [] ( const fs::directory_entry& entry ) {
+            [] ( const fs::directory_entry& entry ) -> bool {
                 return entry.is_regular_file();
             }
         );

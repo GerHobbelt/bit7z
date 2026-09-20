@@ -12,6 +12,7 @@
 
 #include <catch2/catch.hpp>
 
+#include "utils/exception.hpp"
 #include "utils/filesystem.hpp"
 #include "utils/test.hpp"
 
@@ -1015,16 +1016,7 @@ TEST_CASE( "fsutil: Path building with absolute paths should fail", "[fsutil][Sa
     DYNAMIC_SECTION( quoted( testItemPath ) << " inside base path " << quoted( testBasePath ) ) {
         const SafeOutPathBuilder builder{ testBasePath };
         INFO( "Sanitized base path: " << quoted( builder.basePath() ) )
-        REQUIRE_THROWS_MATCHES(
-            builder.buildPath( testItemPath ),
-            BitException,
-            Catch::Matchers::Predicate< BitException >(
-                []( const BitException& exception ) -> bool {
-                    return exception.code() == BitError::ItemHasAbsolutePath;
-                },
-                "Error code should be BitError::ItemHasAbsolutePath"
-            )
-        );
+        REQUIRE_THROWS_CODE( builder.buildPath( testItemPath ), BitError::ItemHasAbsolutePath );
     }
 }
 
@@ -1209,7 +1201,7 @@ TEST_CASE(
 #if !defined( BIT7Z_PATH_SANITIZATION ) && !defined( _WIN32 )
             REQUIRE_THROWS_AS( builder.buildPath( testItemPath ), BitException );
 #else
-            const fs::path sanitizedTestPath = [ &testItemPath ]() -> const fs::path {
+            const auto sanitizedTestPath = [ &testItemPath ]() -> fs::path {
                 const auto firstNonSeparator = testItemPath.native().find_first_not_of( BIT7Z_NATIVE_STRING( "/\\" ) );
                 return testItemPath.native().substr( firstNonSeparator );
             }();
@@ -1289,16 +1281,7 @@ TEST_CASE( "fsutil: Check if extracted path is outside base path", "[fsutil][Saf
         ) {
             const SafeOutPathBuilder builder{ testBasePath };
             INFO( "Sanitized base path: " << quoted( builder.basePath() ) )
-            REQUIRE_THROWS_MATCHES(
-                builder.buildPath( slipPath ),
-                BitException,
-                Catch::Matchers::Predicate< BitException >(
-                    []( const BitException& exception ) -> bool {
-                        return exception.code() == BitError::ItemPathOutsideOutputDirectory;
-                    },
-                    "Error code should be BitError::ItemPathOutsideOutputDirectory"
-                )
-            );
+            REQUIRE_THROWS_CODE( builder.buildPath( slipPath ), BitError::ItemPathOutsideOutputDirectory );
         }
 
         fs::current_path( oldCurrentPath );
