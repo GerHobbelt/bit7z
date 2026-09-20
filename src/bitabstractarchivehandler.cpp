@@ -3,7 +3,7 @@
 
 /*
  * bit7z - A C++ static library to interface with the 7-zip shared libraries.
- * Copyright (c) 2014-2023 Riccardo Ostani - All Rights Reserved.
+ * Copyright (c) Riccardo Ostani - All Rights Reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -12,15 +12,21 @@
 
 #include "bitabstractarchivehandler.hpp"
 
-using namespace bit7z;
+#include "bittypes.hpp"
+#include "bit7zlibrary.hpp"
 
-BitAbstractArchiveHandler::BitAbstractArchiveHandler( const Bit7zLibrary& lib,
-                                                      tstring password,
-                                                      OverwriteMode overwriteMode )
-    : mLibrary{ lib },
-      mPassword{ std::move( password ) },
-      mRetainDirectories{ true },
-      mOverwriteMode{ overwriteMode } {}
+#include <utility>
+
+namespace bit7z {
+
+BitAbstractArchiveHandler::BitAbstractArchiveHandler(
+    const Bit7zLibrary& lib,
+    tstring password,
+    OverwriteMode overwriteMode
+) : mLibrary{ lib },
+    mPassword{ std::move( password ) },
+    mRetainDirectories{ true },
+    mOverwriteMode{ overwriteMode } {}
 
 auto BitAbstractArchiveHandler::library() const noexcept -> const Bit7zLibrary& {
     return mLibrary;
@@ -58,7 +64,7 @@ auto BitAbstractArchiveHandler::passwordCallback() const -> PasswordCallback {
     return mPasswordCallback;
 }
 
-auto BitAbstractArchiveHandler::overwriteMode() const -> OverwriteMode {
+auto BitAbstractArchiveHandler::overwriteMode() const noexcept -> OverwriteMode {
     return mOverwriteMode;
 }
 
@@ -97,3 +103,5 @@ void BitAbstractArchiveHandler::setPasswordCallback( const PasswordCallback& cal
 void BitAbstractArchiveHandler::setOverwriteMode( OverwriteMode mode ) {
     mOverwriteMode = mode;
 }
+
+} // namespace bit7z

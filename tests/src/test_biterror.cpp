@@ -3,7 +3,7 @@
 
 /*
  * bit7z - A C++ static library to interface with the 7-zip shared libraries.
- * Copyright (c) 2014-2023 Riccardo Ostani - All Rights Reserved.
+ * Copyright (c) Riccardo Ostani - All Rights Reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -15,7 +15,7 @@
 #include <bit7z/biterror.hpp>
 
 #ifndef BIT7Z_TESTS_PUBLIC_API_ONLY
-#include "internal/extractcallback.hpp"
+#include <internal/operationresult.hpp>
 #endif
 
 using bit7z::BitError;
@@ -45,6 +45,7 @@ TEST_CASE( "BitError: Checking that error values correspond to the correct failu
                                        ERROR_SOURCE( ItemIsAFolder, InvalidArgument ),
                                        ERROR_SOURCE( ItemMarkedAsDeleted, OperationNotPermitted ),
                                        ERROR_SOURCE( NoMatchingItems, NoSuchItem ),
+                                       ERROR_SOURCE( NoMatchingFile, NoSuchItem ),
                                        ERROR_SOURCE( NoMatchingSignature, InvalidArchive ),
                                        ERROR_SOURCE( NonEmptyOutputBuffer, InvalidArgument ),
                                        ERROR_SOURCE( RequestedWrongVariantType, OperationNotSupported ),

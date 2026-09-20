@@ -3,21 +3,22 @@
 
 /*
  * bit7z - A C++ static library to interface with the 7-zip shared libraries.
- * Copyright (c) 2014-2022 Riccardo Ostani - All Rights Reserved.
+ * Copyright (c) Riccardo Ostani - All Rights Reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-#if !defined(__GNUC__) || __GNUC__ >= 5 || defined( __clang__ )
-
 #include <catch2/catch.hpp>
 
 #include <bit7z/bitexception.hpp>
+#include <bit7z/bitwindows.hpp>
 #include <internal/windows.hpp>
 
 #include <iostream>
+#include <utility>
+#include <system_error>
 
 using bit7z::BitException;
 
@@ -265,5 +266,3 @@ TEST_CASE( "BitException: Checking if failed files are moved to the exception co
     // Note: BitException should have cleared failedFiles, so it is again usable.
     REQUIRE( failedFiles.empty() ); // NOLINT(bugprone-use-after-move) //-V1030
 }
-
-#endif

@@ -3,7 +3,7 @@
 
 /*
  * bit7z - A C++ static library to interface with the 7-zip shared libraries.
- * Copyright (c) 2014-2023 Riccardo Ostani - All Rights Reserved.
+ * Copyright (c) Riccardo Ostani - All Rights Reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -12,22 +12,16 @@
 
 #include <catch2/catch.hpp>
 
+#include "utils/archive.hpp"
 #include "utils/filesystem.hpp"
 #include "utils/shared_lib.hpp"
+#include "utils/sourcelocation.hpp"
 
+#include <bit7z/bitformat.hpp>
 #include <bit7z/bitarchiveeditor.hpp>
 #include <bit7z/bitarchivereader.hpp>
 #include <bit7z/bitarchivewriter.hpp>
-#include <bit7z/bitformat.hpp>
 #include <bit7z/bittypes.hpp>
-
-#include <internal/fs.hpp>
-#include <internal/stringutil.hpp>
-
-#include <chrono>
-#include <cstdint>
-#include <string>
-#include <vector>
 
 #ifndef _WIN32
 #include <unistd.h> // for geteuid
@@ -37,39 +31,373 @@ using namespace bit7z;
 using namespace bit7z::test;
 using namespace bit7z::test::filesystem;
 
-namespace {
-
-/* Local stand-in for TempTestDirectory (introduced on the develop branch
- * for v4.1). The public surface (constructor, path() accessor, tstring
- * conversion) mirrors TempTestDirectory so the eventual swap is just a
- * type rename. TODO: Replace this with TempTestDirectory once develop lands. */
-class ScopedTestDir {
-    public:
-        explicit ScopedTestDir( const std::string& dirName ) {
-            const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-            mDirectory = fs::temp_directory_path() / ( dirName + "_" + std::to_string( stamp ) );
-            fs::create_directories( mDirectory );
-        }
-
-        ScopedTestDir( const ScopedTestDir& ) = delete;
-        ScopedTestDir( ScopedTestDir&& ) = delete;
-        auto operator=( const ScopedTestDir& ) -> ScopedTestDir& = delete;
-        auto operator=( ScopedTestDir&& ) -> ScopedTestDir& = delete;
-
-        ~ScopedTestDir() {
-            std::error_code ignored;
-            fs::remove_all( mDirectory, ignored );
-        }
-
-        BIT7Z_NODISCARD
-        auto path() const -> const fs::path& { return mDirectory; }
-
-        operator tstring() const { return path_to_tstring( mDirectory ); } // NOLINT(*-explicit-constructor, *-explicit-conversions)
-
-    private:
-        fs::path mDirectory;
+struct EditedArchive : TestOutputArchive {
+    EditedArchive( std::string extension, const BitInOutFormat& format, std::size_t packedSize )
+        : TestOutputArchive{ std::move( extension ), format, packedSize, multiple_items_content() } {}
 };
 
+TEST_CASE( "BitArchiveEditor: Opening a non-existing archive should throw", "[bitarchiveeditor]" ) {
+    REQUIRE_THROWS( BitArchiveEditor{ test::sevenzip_lib(), BIT7Z_STRING( "non_existent.7z" ), BitFormat::SevenZip } );
+}
+
+TEST_CASE( "BitArchiveEditor: Deleting an item using an invalid index should throw and leave the archive unchanged",
+           "[bitarchiveeditor]" ) {
+    const auto arcDir = fs::path{ test_archives_dir } / "extraction" / "multiple_items";
+
+    const TempTestDirectory testDir{ "bitarchiveeditor" };
+
+    const auto testArchive = GENERATE( as< EditedArchive >(),
+                                       EditedArchive{ "7z", BitFormat::SevenZip, 563797 },
+                                       EditedArchive{ "tar", BitFormat::Tar, 617472 },
+                                       EditedArchive{ "wim", BitFormat::Wim, 615351 },
+                                       EditedArchive{ "zip", BitFormat::Zip, 564097 } );
+
+    DYNAMIC_SECTION( "Archive format: " << testArchive.extension() ) {
+        const fs::path originalArcPath = arcDir / ( "multiple_items." + testArchive.extension() );
+        const fs::path editedArcFileName = "edited." + testArchive.extension();
+
+        REQUIRE_NOTHROW( fs::copy_file( originalArcPath, editedArcFileName ) );
+
+        const tstring editedArcPath = to_tstring( editedArcFileName );
+
+        {
+            BitArchiveEditor editor( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE_THROWS( editor.deleteItem( std::numeric_limits< std::uint32_t >::max() ) );
+            REQUIRE_THROWS( editor.deleteItem( editor.itemsCount() ) );
+            REQUIRE_NOTHROW( editor.applyChanges() );
+        }
+
+        {
+            BitArchiveReader reader( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE_ARCHIVE_CONTENT( reader, testArchive );
+        }
+
+        REQUIRE_NOTHROW( fs::remove( editedArcFileName ) );
+    }
+}
+
+TEST_CASE( "BitArchiveEditor: Deleting the only item in a single-item archive should leave the archive empty",
+           "[bitarchiveeditor]" ) {
+    const auto arcDir = fs::path{ test_archives_dir } / "extraction" / "single_file";
+
+    const TempTestDirectory testDir{ "bitarchiveeditor" };
+
+    // For some reason, applying this change to the TAR archive fails on the GitHub Action's Ubuntu Runner
+    // when testing Release builds with 7-Zip 22.01; it works locally and on VMs, so we disable it for now.
+    const auto testArchive = GENERATE( as< EditedArchive >(),
+                                       EditedArchive{ "7z", BitFormat::SevenZip, 478025 },
+                                       //EditedArchive{ "bz2", BitFormat::BZip2, 0 },
+                                       //EditedArchive{ "gz", BitFormat::GZip, 476404 },
+                                       //EditedArchive{ "tar", BitFormat::Tar, 479232 },
+                                       EditedArchive{ "wim", BitFormat::Wim, 478883 },
+                                       //EditedArchive{ "xz", BitFormat::Xz, 478080 },
+                                       EditedArchive{ "zip", BitFormat::Zip, 476398 } );
+
+    DYNAMIC_SECTION( "Archive format: " << testArchive.extension() ) {
+        const fs::path originalArcPath = arcDir / ( "clouds.jpg." + testArchive.extension() );
+        const fs::path editedArcFileName = "edited." + testArchive.extension();
+
+        REQUIRE_NOTHROW( fs::copy_file( originalArcPath, editedArcFileName ) );
+
+        const tstring editedArcPath = to_tstring( editedArcFileName );
+
+        {
+            BitArchiveEditor editor( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE_NOTHROW( editor.deleteItem( 0 ) );
+            REQUIRE_NOTHROW( editor.applyChanges() );
+        }
+
+        {
+            BitArchiveReader reader( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE( reader.itemsCount() == 0 );
+            REQUIRE( reader.size() == 0 );
+            REQUIRE( reader.packSize() == 0 );
+        }
+
+        REQUIRE_NOTHROW( fs::remove( editedArcFileName ) );
+    }
+}
+
+TEST_CASE( "BitArchiveEditor: Deleting a single file in an archive with multiple files (index-based)",
+           "[bitarchiveeditor]" ) {
+    const auto arcDir = fs::path{ test_archives_dir } / "extraction" / "multiple_files";
+
+    const TempTestDirectory testDir{ "bitarchiveeditor" };
+
+    const auto testArchive = GENERATE( as< EditedArchive >(),
+                                       EditedArchive{ "7z", BitFormat::SevenZip, 563797 },
+                                       EditedArchive{ "tar", BitFormat::Tar, 617472 },
+                                       EditedArchive{ "wim", BitFormat::Wim, 615351 },
+                                       EditedArchive{ "zip", BitFormat::Zip, 564097 } );
+
+    DYNAMIC_SECTION( "Archive format: " << testArchive.extension() ) {
+        const fs::path originalArcPath = arcDir / ( "multiple_files." + testArchive.extension() );
+        const fs::path editedArcFileName = "edited." + testArchive.extension();
+
+        REQUIRE_NOTHROW( fs::copy_file( originalArcPath, editedArcFileName ) );
+
+        BitArchiveReader originalReader( test::sevenzip_lib(), to_tstring( originalArcPath ), testArchive.format() );
+        const auto deletedItem = originalReader.find( loremIpsum.name );
+        REQUIRE( deletedItem != originalReader.cend() );
+
+        const tstring editedArcPath = to_tstring( editedArcFileName );
+        {
+            BitArchiveEditor editor( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE_NOTHROW( editor.deleteItem( deletedItem->index() ) );
+            REQUIRE_NOTHROW( editor.applyChanges() );
+        }
+
+        {
+            BitArchiveReader reader( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE( reader.filesCount() == ( originalReader.filesCount() - 1 ) );
+            REQUIRE( reader.find( deletedItem->path() ) == reader.cend() );
+
+            const ExpectedItem expectedItem{ italy, "italy.svg", false };
+            REQUIRE_ARCHIVE_ITEM( reader.format(), reader.itemAt( 0 ), expectedItem );
+        }
+
+        REQUIRE_NOTHROW( fs::remove( editedArcFileName ) );
+    }
+}
+
+TEST_CASE( "BitArchiveEditor: Deleting (non-recursively) a single folder in an archive (index-based)",
+           "[bitarchiveeditor]" ) {
+    const auto arcDir = fs::path{ test_archives_dir } / "extraction" / "multiple_items";
+
+    const TempTestDirectory testDir{ "bitarchiveeditor" };
+
+    // TODO: Check why we can't remove a folder when using the WIM format.
+    const auto testArchive = GENERATE( as< EditedArchive >(),
+                                       EditedArchive{ "7z", BitFormat::SevenZip, 563797 },
+                                       EditedArchive{ "tar", BitFormat::Tar, 617472 },
+                                       //EditedArchive{ "wim", BitFormat::Wim, 615351 },
+                                       EditedArchive{ "zip", BitFormat::Zip, 564097 } );
+
+    DYNAMIC_SECTION( "Archive format: " << testArchive.extension() ) {
+        const fs::path originalArcPath = arcDir / ( "multiple_items." + testArchive.extension() );
+        const fs::path editedArcFileName = "edited." + testArchive.extension();
+
+        REQUIRE_NOTHROW( fs::copy_file( originalArcPath, editedArcFileName ) );
+
+        BitArchiveReader originalReader( test::sevenzip_lib(), to_tstring( originalArcPath ), testArchive.format() );
+        const auto deletedItem = originalReader.find( folder.name );
+        REQUIRE( deletedItem != originalReader.cend() );
+
+        const tstring editedArcPath = to_tstring( editedArcFileName );
+        {
+            BitArchiveEditor editor( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE_NOTHROW( editor.deleteItem( deletedItem->index() ) );
+            REQUIRE_NOTHROW( editor.applyChanges() );
+        }
+
+        {
+            BitArchiveReader reader( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE( reader.itemsCount() == ( originalReader.itemsCount() - 1 ) );
+            REQUIRE( reader.find( deletedItem->path() ) == reader.cend() );
+        }
+
+        REQUIRE_NOTHROW( fs::remove( editedArcFileName ) );
+    }
+}
+
+TEST_CASE( "BitArchiveEditor: Deleting (recursively) a single folder in an archive (index-based)",
+           "[bitarchiveeditor]" ) {
+    const auto arcDir = fs::path{ test_archives_dir } / "extraction" / "multiple_items";
+
+    const TempTestDirectory testDir{ "bitarchiveeditor" };
+
+    const auto testArchive = GENERATE( as< EditedArchive >(),
+                                       EditedArchive{ "7z", BitFormat::SevenZip, 563797 },
+                                       EditedArchive{ "tar", BitFormat::Tar, 617472 },
+                                       EditedArchive{ "wim", BitFormat::Wim, 615351 },
+                                       EditedArchive{ "zip", BitFormat::Zip, 564097 } );
+
+    DYNAMIC_SECTION( "Archive format: " << testArchive.extension() ) {
+        const fs::path originalArcPath = arcDir / ( "multiple_items." + testArchive.extension() );
+        const fs::path editedArcFileName = "edited." + testArchive.extension();
+
+        REQUIRE_NOTHROW( fs::copy_file( originalArcPath, editedArcFileName ) );
+
+        BitArchiveReader originalReader( test::sevenzip_lib(), to_tstring( originalArcPath ), testArchive.format() );
+        const auto deletedItem = originalReader.find( folder.name );
+        REQUIRE( deletedItem != originalReader.cend() );
+
+        const tstring editedArcPath = to_tstring( editedArcFileName );
+        {
+            BitArchiveEditor editor( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE_NOTHROW( editor.deleteItem( deletedItem->index(), DeletePolicy::RecurseDirs ) );
+            REQUIRE_NOTHROW( editor.applyChanges() );
+        }
+
+        {
+            BitArchiveReader reader( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE( reader.itemsCount() == 6 );
+            REQUIRE( reader.find( deletedItem->path() ) == reader.cend() );
+            REQUIRE( reader.find( to_tstring( fs::path{ "folder" } / clouds.name ) ) == reader.cend() );
+        }
+
+        REQUIRE_NOTHROW( fs::remove( editedArcFileName ) );
+    }
+}
+
+TEST_CASE( "BitArchiveEditor: Deleting a single file in an archive with multiple files (path-based)",
+           "[bitarchiveeditor]" ) {
+    const auto arcDir = fs::path{ test_archives_dir } / "extraction" / "multiple_files";
+
+    const TempTestDirectory testDir{ "bitarchiveeditor" };
+
+    const auto testArchive = GENERATE( as< EditedArchive >(),
+                                       EditedArchive{ "7z", BitFormat::SevenZip, 563797 },
+                                       EditedArchive{ "tar", BitFormat::Tar, 617472 },
+                                       EditedArchive{ "wim", BitFormat::Wim, 615351 },
+                                       EditedArchive{ "zip", BitFormat::Zip, 564097 } );
+
+    DYNAMIC_SECTION( "Archive format: " << testArchive.extension() ) {
+        const fs::path originalArcPath = arcDir / ( "multiple_files." + testArchive.extension() );
+        const fs::path editedArcFileName = "edited." + testArchive.extension();
+
+        REQUIRE_NOTHROW( fs::copy_file( originalArcPath, editedArcFileName ) );
+
+        const tstring editedArcPath = to_tstring( editedArcFileName );
+        {
+            BitArchiveEditor editor( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE_NOTHROW( editor.deleteItem( italy.name ) );
+            REQUIRE_NOTHROW( editor.applyChanges() );
+        }
+
+        {
+            BitArchiveReader reader( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE( reader.filesCount() == 1 );
+            REQUIRE( reader.find( italy.name ) == reader.cend() );
+
+            const ExpectedItem expectedItem{ loremIpsum, "Lorem Ipsum.pdf", false };
+            REQUIRE_ARCHIVE_ITEM( reader.format(), reader.itemAt( 0 ), expectedItem );
+        }
+
+        REQUIRE_NOTHROW( fs::remove( editedArcFileName ) );
+    }
+}
+
+TEST_CASE( "BitArchiveEditor: Deleting (non-recursively) a single folder in an archive (path-based)",
+           "[bitarchiveeditor]" ) {
+    const auto arcDir = fs::path{ test_archives_dir } / "extraction" / "multiple_items";
+
+    const TempTestDirectory testDir{ "bitarchiveeditor" };
+
+    // TODO: Check why we can't remove a folder when using the WIM format.
+    const auto testArchive = GENERATE( as< EditedArchive >(),
+                                       EditedArchive{ "7z", BitFormat::SevenZip, 563797 },
+                                       EditedArchive{ "tar", BitFormat::Tar, 617472 },
+    //EditedArchive{ "wim", BitFormat::Wim, 615351 },
+                                       EditedArchive{ "zip", BitFormat::Zip, 564097 } );
+
+    DYNAMIC_SECTION( "Archive format: " << testArchive.extension() ) {
+        const fs::path originalArcPath = arcDir / ( "multiple_items." + testArchive.extension() );
+        const fs::path editedArcFileName = "edited." + testArchive.extension();
+
+        std::uint32_t originalItemsCount = 0;
+        const tstring editedArcPath = to_tstring( editedArcFileName );
+
+        REQUIRE_NOTHROW( fs::copy_file( originalArcPath, editedArcFileName ) );
+
+        {
+            BitArchiveEditor editor( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            originalItemsCount = editor.itemsCount();
+            REQUIRE_NOTHROW( editor.deleteItem( folder.name ) );
+            REQUIRE_NOTHROW( editor.applyChanges() );
+        }
+
+        {
+            BitArchiveReader reader( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE( reader.itemsCount() == ( originalItemsCount - 1 ) );
+            REQUIRE( reader.find( folder.name ) == reader.cend() );
+            REQUIRE( reader.find( to_tstring( fs::path{ "folder" } / clouds.name ) ) != reader.cend() );
+        }
+
+        REQUIRE_NOTHROW( fs::remove( editedArcFileName ) );
+    }
+}
+
+TEST_CASE( "BitArchiveEditor: Deleting (non-recursively) a path with a trailing separator should fail",
+           "[bitarchiveeditor]" ) {
+    const auto arcDir = fs::path{ test_archives_dir } / "extraction" / "multiple_items";
+
+    const TempTestDirectory testDir{ "bitarchiveeditor" };
+
+    // TODO: Check why we can't remove a folder when using the WIM format.
+    const auto testArchive = GENERATE( as< EditedArchive >(),
+                                       EditedArchive{ "7z", BitFormat::SevenZip, 563797 },
+                                       EditedArchive{ "tar", BitFormat::Tar, 617472 },
+    //EditedArchive{ "wim", BitFormat::Wim, 615351 },
+                                       EditedArchive{ "zip", BitFormat::Zip, 564097 } );
+
+    DYNAMIC_SECTION( "Archive format: " << testArchive.extension() ) {
+        const fs::path originalArcPath = arcDir / ( "multiple_items." + testArchive.extension() );
+        const fs::path editedArcFileName = "edited." + testArchive.extension();
+
+        const tstring editedArcPath = to_tstring( editedArcFileName );
+
+        REQUIRE_NOTHROW( fs::copy_file( originalArcPath, editedArcFileName ) );
+
+        {
+            BitArchiveEditor editor( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE_THROWS( editor.deleteItem( to_tstring( fs::path{ folder.name } / "" ) ) );
+            REQUIRE_NOTHROW( editor.applyChanges() );
+        }
+
+        {
+            BitArchiveReader reader( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+            REQUIRE_ARCHIVE_CONTENT( reader, testArchive );
+        }
+
+        REQUIRE_NOTHROW( fs::remove( editedArcFileName ) );
+    }
+}
+
+
+TEST_CASE( "BitArchiveEditor: Deleting (recursively) a single folder in an archive (path-based)",
+           "[bitarchiveeditor]" ) {
+    const auto arcDir = fs::path{ test_archives_dir } / "extraction" / "multiple_items";
+
+    const TempTestDirectory testDir{ "bitarchiveeditor" };
+
+    const auto testArchive = GENERATE( as< EditedArchive >(),
+                                       EditedArchive{ "7z", BitFormat::SevenZip, 563797 },
+                                       EditedArchive{ "tar", BitFormat::Tar, 617472 },
+                                       EditedArchive{ "wim", BitFormat::Wim, 615351 },
+                                       EditedArchive{ "zip", BitFormat::Zip, 564097 } );
+
+    DYNAMIC_SECTION( "Archive format: " << testArchive.extension() ) {
+        const fs::path originalArcPath = arcDir / ( "multiple_items." + testArchive.extension() );
+        const fs::path editedArcFileName = "edited." + testArchive.extension();
+
+        const tstring editedArcPath = to_tstring( editedArcFileName );
+
+        auto deletedPath = GENERATE( as< fs::path >(),
+                                     folder.name,
+                                     fs::path{ folder.name } / "" );
+        DYNAMIC_SECTION( "Path " << deletedPath ) {
+            REQUIRE_NOTHROW( fs::copy_file( originalArcPath, editedArcFileName ) );
+
+            {
+                BitArchiveEditor editor( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+                REQUIRE_NOTHROW( editor.deleteItem( to_tstring( deletedPath ), DeletePolicy::RecurseDirs ) );
+                REQUIRE_NOTHROW( editor.applyChanges() );
+            }
+
+            {
+                BitArchiveReader reader( test::sevenzip_lib(), editedArcPath, testArchive.format() );
+                REQUIRE( reader.itemsCount() == 6 );
+                REQUIRE( reader.find( folder.name ) == reader.cend() );
+                REQUIRE( reader.find( to_tstring( fs::path{ "folder" } / clouds.name ) ) == reader.cend() );
+            }
+
+            REQUIRE_NOTHROW( fs::remove( editedArcFileName ) );
+        }
+    }
+}
+
+namespace {
 template< std::size_t N >
 auto as_bytes( const char ( &text )[ N ] ) -> buffer_t {
     /* N includes the trailing null terminator, which we exclude from the buffer
@@ -82,7 +410,6 @@ auto read_file_text( const fs::path& file ) -> std::string {
     fs::ifstream ifs{ file, std::ios::binary };
     return { std::istreambuf_iterator< char >( ifs ), std::istreambuf_iterator< char >() };
 }
-
 } // namespace
 
 /*
@@ -100,10 +427,10 @@ auto read_file_text( const fs::path& file ) -> std::string {
  */
 TEST_CASE( "BitArchiveEditor: applyChanges does not follow a pre-placed <archive>.tmp", "[bitarchiveeditor]" ) {
     const Bit7zLibrary lib{ sevenzip_lib_path() };
-    const ScopedTestDir scoped{ "test_bitarchiveeditor" };
+    const TempTestDirectory testDir{ "bitarchiveeditor" };
 
-    const fs::path archivePath = scoped.path() / BIT7Z_NATIVE_STRING( "archive.7z" );
-    const tstring archivePathStr = path_to_tstring( archivePath );
+    const fs::path archivePath = testDir.path() / BIT7Z_NATIVE_STRING( "archive.7z" );
+    const tstring archivePathStr = to_tstring( archivePath );
     const tstring itemName = BIT7Z_STRING( "data.txt" );
 
     const buffer_t originalBytes = as_bytes( "Hello, World!" );
@@ -122,7 +449,7 @@ TEST_CASE( "BitArchiveEditor: applyChanges does not follow a pre-placed <archive
         /* POSIX-only: the update must never touch "<archive>.tmp", the
          * temporary archive is staged elsewhere. On Windows the update may
          * target this path, so this expectation does not hold there. */
-        const fs::path archiveTmpPath = scoped.path() / "archive.7z.tmp";
+        const fs::path archiveTmpPath = testDir.path() / "archive.7z.tmp";
         const std::string sentinelText = "sentinel-text";
         {
             fs::ofstream ofs{ archiveTmpPath, std::ios::binary };
@@ -144,8 +471,8 @@ TEST_CASE( "BitArchiveEditor: applyChanges does not follow a pre-placed <archive
     }
 
     SECTION( "pre-placed symlink at <archive>.tmp does not redirect the update" ) {
-        const fs::path archiveTmpPath = scoped.path() / "archive.7z.tmp";
-        const fs::path victim = scoped.path() / "victim.txt";
+        const fs::path archiveTmpPath = testDir.path() / "archive.7z.tmp";
+        const fs::path victim = testDir.path() / "victim.txt";
         const std::string victimText = "victim-original";
         {
             fs::ofstream ofs{ victim, std::ios::binary };
@@ -179,7 +506,7 @@ TEST_CASE( "BitArchiveEditor: applyChanges does not follow a pre-placed <archive
         if ( ::geteuid() == 0 ) {
             SUCCEED( "Skipping: root bypasses directory permissions" );
         } else {
-            const auto originalPerms = fs::status( scoped.path() ).permissions();
+            const auto originalPerms = fs::status( testDir.path() ).permissions();
             struct PermsRestorer {
                 const fs::path& target;
                 fs::perms perms;
@@ -187,10 +514,10 @@ TEST_CASE( "BitArchiveEditor: applyChanges does not follow a pre-placed <archive
                     std::error_code ignored;
                     fs::permissions( target, perms, fs::perm_options::replace, ignored );
                 }
-            } const restorer{ scoped.path(), originalPerms };
+            } const restorer{ testDir.path(), originalPerms };
 
             std::error_code permError;
-            fs::permissions( scoped.path(),
+            fs::permissions( testDir.path(),
                              fs::perms::owner_read | fs::perms::owner_exec,
                              fs::perm_options::replace,
                              permError );
@@ -204,8 +531,8 @@ TEST_CASE( "BitArchiveEditor: applyChanges does not follow a pre-placed <archive
                 }
 
                 /* Restore write permission so the reader can traverse and so
-                 * ScopedTestDir's destructor can clean up afterward. */
-                fs::permissions( scoped.path(), originalPerms, fs::perm_options::replace );
+                 * TempTestDirectory's destructor can clean up afterward. */
+                fs::permissions( testDir.path(), originalPerms, fs::perm_options::replace );
 
                 BitArchiveReader reader{ lib, archivePathStr, BitFormat::SevenZip };
                 REQUIRE( reader.itemsCount() == 1u );
@@ -220,7 +547,7 @@ TEST_CASE( "BitArchiveEditor: applyChanges does not follow a pre-placed <archive
         /* Windows-only: when "<archive>.tmp" already exists, the update must
          * step past it via a numeric postfix and proceed. The pre-existing
          * entry must remain untouched. */
-        const fs::path archiveTmpPath = scoped.path() / BIT7Z_NATIVE_STRING( "archive.7z.tmp" );
+        const fs::path archiveTmpPath = testDir.path() / BIT7Z_NATIVE_STRING( "archive.7z.tmp" );
         const std::string sentinelText = "sentinel-text";
         {
             fs::ofstream ofs{ archiveTmpPath, std::ios::binary };
@@ -240,7 +567,7 @@ TEST_CASE( "BitArchiveEditor: applyChanges does not follow a pre-placed <archive
         // The archive must now hold the updated content.
         BitArchiveReader reader{ lib, archivePathStr, BitFormat::SevenZip };
         REQUIRE( reader.itemsCount() == 1u );
-        std::vector< byte_t > content;
+        buffer_t content;
         reader.extractTo( content );
         REQUIRE( content == updatedBytes );
     }
@@ -252,8 +579,8 @@ TEST_CASE( "BitArchiveEditor: applyChanges does not follow a pre-placed <archive
          * symlink can be created, the update must step past it via a numeric
          * postfix: the symlink target must remain untouched, and the symlink
          * itself must not be replaced. */
-        const fs::path archiveTmpPath = scoped.path() / BIT7Z_NATIVE_STRING( "archive.7z.tmp" );
-        const fs::path victim = scoped.path() / BIT7Z_NATIVE_STRING( "victim.txt" );
+        const fs::path archiveTmpPath = testDir.path() / BIT7Z_NATIVE_STRING( "archive.7z.tmp" );
+        const fs::path victim = testDir.path() / BIT7Z_NATIVE_STRING( "victim.txt" );
         const std::string victimText = "victim-original";
         {
             fs::ofstream ofs{ victim, std::ios::binary };
@@ -283,7 +610,7 @@ TEST_CASE( "BitArchiveEditor: applyChanges does not follow a pre-placed <archive
             // The archive must now hold the updated content.
             BitArchiveReader reader{ lib, archivePathStr, BitFormat::SevenZip };
             REQUIRE( reader.itemsCount() == 1u );
-            std::vector< byte_t > content;
+            buffer_t content;
             reader.extractTo( content );
             REQUIRE( content == updatedBytes );
         }
@@ -300,10 +627,10 @@ TEST_CASE( "BitArchiveEditor: applyChanges does not follow a pre-placed <archive
  */
 TEST_CASE( "BitArchiveEditor: applyChanges refuses in-place multi-volume updates", "[bitarchiveeditor]" ) {
     const Bit7zLibrary lib{ sevenzip_lib_path() };
-    const ScopedTestDir scoped{ "test_bitarchiveeditor" };
+    const TempTestDirectory testDir{ "bitarchiveeditor" };
 
-    const fs::path archivePath = scoped.path() / BIT7Z_NATIVE_STRING( "archive.7z" );
-    const tstring archivePathStr = path_to_tstring( archivePath );
+    const fs::path archivePath = testDir.path() / BIT7Z_NATIVE_STRING( "archive.7z" );
+    const tstring archivePathStr = to_tstring( archivePath );
     const tstring itemName = BIT7Z_STRING( "data.txt" );
 
     const buffer_t originalBytes = as_bytes( "Hello, World!" );

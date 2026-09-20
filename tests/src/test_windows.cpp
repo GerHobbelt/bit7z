@@ -3,7 +3,7 @@
 
 /*
  * bit7z - A C++ static library to interface with the 7-zip shared libraries.
- * Copyright (c) 2014-2022 Riccardo Ostani - All Rights Reserved.
+ * Copyright (c) Riccardo Ostani - All Rights Reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -14,11 +14,10 @@
 
 #include <catch2/catch.hpp>
 
-#include <array>
-#include <cstring>
-#include <iostream>
-
+#include <bitwindows.hpp>
 #include <internal/windows.hpp>
+
+#include <cstring>
 
 TEST_CASE( "winapi: Checking error code macros correct values", "[winapi]" ) {
 #ifdef MY__E_ERROR_NEGATIVE_SEEK
@@ -37,7 +36,7 @@ TEST_CASE( "winapi: Allocating BSTR string from nullptr C strings", "[winapi][st
 
     SECTION( "Using a specific length" ) {
         BSTR resultString = nullptr;
-        const size_t testLength = GENERATE( 0, 1, 42, 127, 128 );
+        const std::size_t testLength = GENERATE( 0, 1, 42, 127, 128 );
 
         DYNAMIC_SECTION( "SysAllocStringLen with length " << testLength ) {
             resultString = SysAllocStringLen( nullptr, testLength );

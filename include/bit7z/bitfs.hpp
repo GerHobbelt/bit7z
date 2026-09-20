@@ -3,7 +3,7 @@
 
 /*
  * bit7z - A C++ static library to interface with the 7-zip shared libraries.
- * Copyright (c) 2014-2023 Riccardo Ostani - All Rights Reserved.
+ * Copyright (c) Riccardo Ostani - All Rights Reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -15,17 +15,18 @@
 
 /* Header for forward declaring fs namespace. */
 
-#include "bitdefines.hpp" /* For BIT7Z_USE_STANDARD_FILESYSTEM */
+#include "bitdefines.hpp" /* For BIT7Z_USE_STANDARD_FILESYSTEM. */
 
 #ifdef BIT7Z_USE_STANDARD_FILESYSTEM
 #include <filesystem>
 #else
-/* Notes: we use this forward declaration to avoid including private headers (e.g. fs.hpp).
- *        Since some public API headers include bitgenericitem.hpp (e.g. "bitoutputarchive.hpp"),
+/* Notes: we use this forward declaration to avoid including private headers (e.g., fs.hpp).
+ *        Since some public API headers include bitgenericitem.hpp (e.g., "bitoutputarchive.hpp"),
  *        including private headers here would result in the "leaking" out of these latter in the public API.*/
 namespace ghc {
 namespace filesystem {
 class path;
+class directory_entry;
 } // namespace filesystem
 } // namespace ghc
 #endif

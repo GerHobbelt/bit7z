@@ -3,16 +3,21 @@
 
 /*
  * bit7z - A C++ static library to interface with the 7-zip shared libraries.
- * Copyright (c) 2014-2023 Riccardo Ostani - All Rights Reserved.
+ * Copyright (c) Riccardo Ostani - All Rights Reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-#include "bitexception.hpp"
-#include "internal/cfileinstream.hpp"
 #include "internal/opencallback.hpp"
+
+#include "bitabstractarchivehandler.hpp"
+#include "bitexception.hpp"
+#include "bitpropvariant.hpp"
+#include "internal/callback.hpp"
+#include "internal/cfileinstream.hpp"
+#include "internal/fsutil.hpp"
 #include "internal/stringutil.hpp"
 #include "internal/util.hpp"
 
@@ -40,7 +45,7 @@ COM_DECLSPEC_NOTHROW
 STDMETHODIMP OpenCallback::GetProperty( PROPID property, PROPVARIANT* value ) noexcept try {
     BitPropVariant prop;
     if ( property == kpidName ) {
-        prop = mSubArchiveMode ? mSubArchiveName : path_to_wide_string( mArchivePath.filename() );
+        prop = mSubArchiveMode ? mSubArchiveName : pathToSevenzipString( mArchivePath.filename() );
     }
     *value = prop;
     prop.bstrVal = nullptr; // NOLINT(*-pro-type-union-access)
@@ -68,7 +73,7 @@ STDMETHODIMP OpenCallback::GetStream( const wchar_t* name, IInStream** inStream 
         }
 
         try {
-            auto inStreamTemp = bit7z::make_com< CFileInStream >( streamPath );
+            auto inStreamTemp = bit7z::make_com< CFileInStream >( streamPath.native() );
             *inStream = inStreamTemp.Detach();
         } catch ( const BitException& ex ) {
             return ex.nativeCode();

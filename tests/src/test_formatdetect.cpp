@@ -3,7 +3,7 @@
 
 /*
  * bit7z - A C++ static library to interface with the 7-zip shared libraries.
- * Copyright (c) 2014-2022 Riccardo Ostani - All Rights Reserved.
+ * Copyright (c) Riccardo Ostani - All Rights Reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -127,15 +127,13 @@ TEST_CASE( "formatdetect: Format detection by extension", "[formatdetect]" ) {
                           TestInputFormat{ "zipx", BitFormat::Zip } );
 
     DYNAMIC_SECTION( "Extension: " << test.extension ) {
-        REQUIRE( detect_format_from_extension( "valid." + test.extension ) == test.format );
+        REQUIRE( detectFormatFromExtension( "valid." + test.extension ) == test.format );
     }
 }
 #endif
 
 TEST_CASE( "formatdetect: Format detection by signature", "[formatdetect]" ) {
     const TestDirectory testDir{ fs::path{ test_archives_dir } / "detection" / "valid" };
-
-    const Bit7zLibrary lib{ test::sevenzip_lib_path() };
 
     auto test = GENERATE( TestInputFormat{ "7z", BitFormat::SevenZip },
                           TestInputFormat{ "ar", BitFormat::Deb },
@@ -223,7 +221,7 @@ TEST_CASE( "formatdetect: Format detection by signature", "[formatdetect]" ) {
         // Hence, we use BitArchiveReader for reading the file from a buffer (to avoid detection via file extensions).
 
         REQUIRE_LOAD_FILE( fileBuffer, "valid." + test.extension );
-        const BitArchiveReader reader{ lib, fileBuffer };
+        const BitArchiveReader reader{ test::sevenzip_lib(), fileBuffer };
         REQUIRE( reader.detectedFormat() == test.format );
     }
 }
@@ -236,15 +234,13 @@ TEST_CASE( "formatdetect: Format detection by signature (UDF files)", "[formatde
     const auto testDir = fs::path{ test_archives_dir } / "detection" / "valid";
     REQUIRE( set_current_dir( testDir ) );
 
-    const Bit7zLibrary lib{ test::sevenzip_lib_path() };
-
     auto test = GENERATE( TestInputFormat{ "udf", BitFormat::Udf },
                           TestInputFormat{ "udf.img", BitFormat::Udf },
                           TestInputFormat{ "udf.iso", BitFormat::Udf } );
 
     DYNAMIC_SECTION( "Extension: " << test.extension ) {
         REQUIRE_LOAD_FILE( fileBuffer, "valid." + test.extension );
-        const BitArchiveReader reader{ lib, fileBuffer };
+        const BitArchiveReader reader{ test::sevenzip_lib(), fileBuffer };
         REQUIRE( reader.detectedFormat() == test.format );
     }
 
@@ -289,11 +285,10 @@ TEST_CASE( "formatdetect: Format detection of an archive file without an extensi
     const TestDirectory testDir{ fs::path{ test_archives_dir } / "detection" };
 
 #ifdef BIT7Z_DETECT_FROM_EXTENSION
-    REQUIRE( detect_format_from_extension( "noextension" ) == BitFormat::Auto );
+    REQUIRE( detectFormatFromExtension( "noextension" ) == BitFormat::Auto );
 #endif
 
-    const Bit7zLibrary lib{ test::sevenzip_lib_path() };
-    const BitArchiveReader reader{ lib, BIT7Z_STRING( "noextension" ) };
+    const BitArchiveReader reader{ test::sevenzip_lib(), BIT7Z_STRING( "noextension" ) };
     REQUIRE( reader.detectedFormat() == BitFormat::SevenZip );
     REQUIRE_NOTHROW( reader.test() );
 }

@@ -1,6 +1,6 @@
 /*
  * bit7z - A C++ static library to interface with the 7-zip shared libraries.
- * Copyright (c) 2014-2023 Riccardo Ostani - All Rights Reserved.
+ * Copyright (c) Riccardo Ostani - All Rights Reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -10,9 +10,10 @@
 #ifndef BITERROR_HPP
 #define BITERROR_HPP
 
-#include <system_error>
-
 #include "bitdefines.hpp"
+
+#include <system_error>
+#include <type_traits>
 
 namespace bit7z {
 
@@ -33,6 +34,7 @@ enum struct BitError {
     ItemIsAFolder,
     ItemMarkedAsDeleted,
     NoMatchingItems,
+    NoMatchingFile,
     NoMatchingSignature,
     NonEmptyOutputBuffer,
     NullOutputBuffer,
@@ -47,7 +49,7 @@ enum struct BitError {
     InvalidItemPath
 };
 
-auto make_error_code( BitError error ) -> std::error_code;
+auto make_error_code( BitError error ) noexcept -> std::error_code;
 
 /**
  * @brief The BitFailureSource enum struct values represent bit7z error conditions.
@@ -70,16 +72,16 @@ enum struct BitFailureSource {
     WrongPassword
 };
 
-auto make_error_condition( BitFailureSource failureSource ) -> std::error_condition;
+auto make_error_condition( BitFailureSource failureSource ) noexcept -> std::error_condition;
 
-}  // namespace bit7z
+} // namespace bit7z
 
 namespace std {
 template<>
-struct BIT7Z_MAYBE_UNUSED is_error_code_enum< bit7z::BitError > : public true_type {};
+struct BIT7Z_MAYBE_UNUSED is_error_code_enum< bit7z::BitError > : std::true_type {};
 
-template <>
-struct BIT7Z_MAYBE_UNUSED is_error_condition_enum< bit7z::BitFailureSource > : public true_type {};
+template<>
+struct BIT7Z_MAYBE_UNUSED is_error_condition_enum< bit7z::BitFailureSource > : std::true_type {};
 } // namespace std
 
 #endif //BITERROR_HPP

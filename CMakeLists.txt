@@ -5,7 +5,7 @@
 cmake_minimum_required( VERSION 3.14 )
 
 project( bit7z
-         VERSION 4.0.11
+         VERSION 4.0.12
          DESCRIPTION "A C++ static library offering a clean and simple interface to the 7-zip/p7zip shared libraries"
          HOMEPAGE_URL "https://github.com/rikyoz/bit7z/" )
 set( CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" )
@@ -19,6 +19,7 @@ endif()
 set( PUBLIC_HEADERS
      include/bit7z/bit7z.hpp
      include/bit7z/bit7zlibrary.hpp
+     include/bit7z/bit7zlibraryloader.hpp
      include/bit7z/bitabstractarchivecreator.hpp
      include/bit7z/bitabstractarchivehandler.hpp
      include/bit7z/bitabstractarchiveopener.hpp
@@ -40,12 +41,16 @@ set( PUBLIC_HEADERS
      include/bit7z/bitformat.hpp
      include/bit7z/bitfs.hpp
      include/bit7z/bitgenericitem.hpp
+     include/bit7z/bitindicesview.hpp
      include/bit7z/bitinputarchive.hpp
+     include/bit7z/bitinputitem.hpp
      include/bit7z/bititemsvector.hpp
      include/bit7z/bitmemcompressor.hpp
      include/bit7z/bitmemextractor.hpp
+     include/bit7z/bitnestedarchivereader.hpp
      include/bit7z/bitoutputarchive.hpp
      include/bit7z/bitpropvariant.hpp
+     include/bit7z/bitsharedlibrary.hpp
      include/bit7z/bitstreamcompressor.hpp
      include/bit7z/bitstreamextractor.hpp
      include/bit7z/bittypes.hpp
@@ -56,7 +61,7 @@ set( HEADERS
      src/internal/archiveproperties.hpp
      src/internal/atomicfilereplacer.hpp
      src/internal/bufferextractcallback.hpp
-     src/internal/bufferitem.hpp
+     src/internal/bufferqueue.hpp
      src/internal/bufferutil.hpp
      src/internal/callback.hpp
      src/internal/cbufferinstream.hpp
@@ -67,34 +72,40 @@ set( HEADERS
      src/internal/cmultivolumeinstream.hpp
      src/internal/cmultivolumeoutstream.hpp
      src/internal/com.hpp
+     src/internal/cpp17.hpp
+     src/internal/cpp20.hpp
+     src/internal/cpp26.hpp
+     src/internal/crawoutstream.hpp
      src/internal/cstdinstream.hpp
      src/internal/cstdoutstream.hpp
      src/internal/csymlinkinstream.hpp
-     src/internal/cvolumeinstream.hpp
+     src/internal/csynchronizedinstream.hpp
+     src/internal/csynchronizedoutstream.hpp
      src/internal/cvolumeoutstream.hpp
      src/internal/dateutil.hpp
      src/internal/extractcallback.hpp
      src/internal/failuresourcecategory.hpp
      src/internal/fileextractcallback.hpp
+     src/internal/filehandle.hpp
      src/internal/fixedbufferextractcallback.hpp
      src/internal/formatdetect.hpp
      src/internal/fsindexer.hpp
-     src/internal/fsitem.hpp
      src/internal/fsutil.hpp
      src/internal/fs.hpp
-     src/internal/genericinputitem.hpp
      src/internal/guiddef.hpp
      src/internal/guids.hpp
      src/internal/hresultcategory.hpp
      src/internal/internalcategory.hpp
      src/internal/macros.hpp
      src/internal/opencallback.hpp
+     src/internal/opencategory.hpp
+     src/internal/openerror.hpp
      src/internal/operationcategory.hpp
      src/internal/operationresult.hpp
+     src/internal/optional.hpp
      src/internal/processeditem.hpp
-     src/internal/renameditem.hpp
-     src/internal/securetempdir.hpp
-     src/internal/stdinputitem.hpp
+     src/internal/rawdataextractcallback.hpp
+     src/internal/sequentialextractcallback.hpp
      src/internal/streamextractcallback.hpp
      src/internal/streamutil.hpp
      src/internal/stringutil.hpp
@@ -105,6 +116,7 @@ set( HEADERS
 # source files
 set( SOURCES
      src/bit7zlibrary.cpp
+     src/bit7zlibraryloader.cpp
      src/bitabstractarchivecreator.cpp
      src/bitabstractarchivehandler.cpp
      src/bitabstractarchiveopener.cpp
@@ -119,13 +131,16 @@ set( SOURCES
      src/bitfilecompressor.cpp
      src/bitformat.cpp
      src/bitinputarchive.cpp
+     src/bitinputitem.cpp
      src/bititemsvector.cpp
+     src/bitnestedarchivereader.cpp
      src/bitoutputarchive.cpp
      src/bitpropvariant.cpp
+     src/bitsharedlibrary.cpp
      src/bittypes.cpp
      src/internal/atomicfilereplacer.cpp
      src/internal/bufferextractcallback.cpp
-     src/internal/bufferitem.cpp
+     src/internal/bufferqueue.cpp
      src/internal/bufferutil.cpp
      src/internal/callback.cpp
      src/internal/cbufferinstream.cpp
@@ -135,31 +150,33 @@ set( SOURCES
      src/internal/cfixedbufferoutstream.cpp
      src/internal/cmultivolumeinstream.cpp
      src/internal/cmultivolumeoutstream.cpp
+     src/internal/crawoutstream.cpp
      src/internal/cstdinstream.cpp
      src/internal/cstdoutstream.cpp
      src/internal/csymlinkinstream.cpp
-     src/internal/cvolumeinstream.cpp
+     src/internal/csynchronizedinstream.cpp
+     src/internal/csynchronizedoutstream.cpp
      src/internal/cvolumeoutstream.cpp
      src/internal/dateutil.cpp
      src/internal/extractcallback.cpp
      src/internal/failuresourcecategory.cpp
      src/internal/fileextractcallback.cpp
+     src/internal/filehandle.cpp
      src/internal/fixedbufferextractcallback.cpp
      src/internal/formatdetect.cpp
      src/internal/fsindexer.cpp
-     src/internal/fsitem.cpp
      src/internal/fsutil.cpp
-     src/internal/genericinputitem.cpp
      src/internal/guids.cpp
      src/internal/hresultcategory.cpp
      src/internal/internalcategory.cpp
      src/internal/opencallback.cpp
+     src/internal/opencategory.cpp
+     src/internal/openerror.cpp
      src/internal/operationcategory.cpp
      src/internal/operationresult.cpp
      src/internal/processeditem.cpp
-     src/internal/renameditem.cpp
-     src/internal/securetempdir.cpp
-     src/internal/stdinputitem.cpp
+     src/internal/rawdataextractcallback.cpp
+     src/internal/sequentialextractcallback.cpp
      src/internal/streamextractcallback.cpp
      src/internal/stringutil.cpp
      src/internal/updatecallback.cpp
@@ -200,12 +217,39 @@ include( cmake/CompilerOptions.cmake )
 # dependencies
 include( cmake/Dependencies.cmake )
 
+if( BIT7Z_USE_PCH AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.16.0" )
+    target_precompile_headers( ${LIB_TARGET}
+                               PRIVATE
+                               ${HEADERS}
+                               ${PUBLIC_HEADERS}
+                               <algorithm>
+                               <array>
+                               <climits>
+                               <cstddef>
+                               <cstdint>
+                               <functional>
+                               <ios>
+                               <istream>
+                               <map>
+                               <memory>
+                               <ostream>
+                               <set>
+                               <system_error>
+                               <vector>
+                               <unordered_map>
+                               <utility> )
+endif()
+
 # 7-zip source code
 target_link_libraries( ${LIB_TARGET} PRIVATE 7-zip )
 
-# filesystem library (needed if std::filesystem is not available)
-if( ghc_filesystem_ADDED )
-    target_link_libraries( ${LIB_TARGET} PRIVATE ghc_filesystem )
+# filesystem library
+#  - empty library for modern compilers (no extra linking required).
+#  - libstdc++fs/libc++fs for older versions of libstdc++/libc++.
+#  - ghc::filesystem for even older libraries supporting only C++11/C++14 standards.
+target_link_libraries( ${LIB_TARGET} PRIVATE filesystem_lib )
+if( NOT ghc_filesystem_ADDED AND BIT7Z_USE_PCH AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.16.0" )
+    target_precompile_headers( ${LIB_TARGET} PRIVATE <filesystem> )
 endif()
 
 # public includes
@@ -219,7 +263,7 @@ target_include_directories( ${LIB_TARGET} PRIVATE "${PROJECT_SOURCE_DIR}/include
 # 7-zip compilation definitions
 target_compile_definitions( ${LIB_TARGET} PRIVATE UNICODE _UNICODE )
 if( WIN32 )
-    target_compile_definitions( ${LIB_TARGET} PRIVATE _WINDOWS )
+    target_compile_definitions( ${LIB_TARGET} PRIVATE _WINDOWS WIN32_LEAN_AND_MEAN NOMINMAX )
     target_link_libraries( ${LIB_TARGET} PUBLIC oleaut32 user32 )
 endif()
 

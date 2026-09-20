@@ -1,6 +1,6 @@
 /*
  * bit7z - A C++ static library to interface with the 7-zip shared libraries.
- * Copyright (c) 2014-2023 Riccardo Ostani - All Rights Reserved.
+ * Copyright (c) Riccardo Ostani - All Rights Reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -9,9 +9,6 @@
 
 #ifndef BITFORMAT_HPP
 #define BITFORMAT_HPP
-
-#include <bitset>
-#include <type_traits>
 
 #include "bitcompressionmethod.hpp"
 #include "bitdefines.hpp"
@@ -23,29 +20,21 @@ namespace bit7z {
  * @brief The FormatFeatures enum specifies the features supported by an archive file format.
  */
 enum struct FormatFeatures : unsigned {
-    MultipleFiles = 1u << 0,    ///< The format can compress/extract multiple files         (2^0 = 0000001)
-    SolidArchive = 1u << 1,     ///< The format supports solid archives                     (2^1 = 0000010)
-    CompressionLevel = 1u << 2, ///< The format is able to use different compression levels (2^2 = 0000100)
-    Encryption = 1u << 3,       ///< The format supports archive encryption                 (2^3 = 0001000)
-    HeaderEncryption = 1u << 4, ///< The format can encrypt the file names                  (2^4 = 0010000)
-    MultipleMethods = 1u << 5   ///< The format can use different compression methods       (2^6 = 0100000)
+    MultipleFiles = 1u << 0,    ///< The format can compress/extract multiple files.
+    SolidArchive = 1u << 1,     ///< The format supports solid archives.
+    CompressionLevel = 1u << 2, ///< The format is able to use different compression levels.
+    Encryption = 1u << 3,       ///< The format supports archive encryption.
+    HeaderEncryption = 1u << 4, ///< The format can encrypt the file names.
+    MultipleMethods = 1u << 5   ///< The format can use different compression methods.
 };
 
-template< typename Enum >
-using underlying_type_t = typename std::underlying_type< Enum >::type;
-
-template< typename Enum >
-inline constexpr auto to_underlying( Enum enum_value ) noexcept -> underlying_type_t< Enum > {
-    return static_cast< underlying_type_t< Enum > >( enum_value );
-}
-
-inline constexpr auto operator|( FormatFeatures lhs, FormatFeatures rhs ) noexcept -> FormatFeatures {
+constexpr auto operator|( FormatFeatures lhs, FormatFeatures rhs ) noexcept -> FormatFeatures {
     return static_cast< FormatFeatures >( to_underlying( lhs ) | to_underlying( rhs ) );
 }
 
 using FormatFeaturesType = underlying_type_t< FormatFeatures >;
 
-inline constexpr auto operator&( FormatFeatures lhs, FormatFeatures rhs ) noexcept -> FormatFeaturesType {
+constexpr auto operator&( FormatFeatures lhs, FormatFeatures rhs ) noexcept -> FormatFeaturesType {
     return to_underlying( lhs ) & to_underlying( rhs );
 }
 

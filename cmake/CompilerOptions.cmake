@@ -5,6 +5,8 @@
 # compiler-specific options
 
 if( MSVC )
+    target_compile_definitions( ${LIB_TARGET} PRIVATE _CRT_DECLARE_NONSTDC_NAMES=0 )
+
     # setting a pdb file name for debug builds (otherwise it is not generated!)
     set_target_properties( ${LIB_TARGET} PROPERTIES COMPILE_PDB_NAME_DEBUG ${LIB_TARGET}${CMAKE_DEBUG_POSTFIX} )
 
@@ -88,6 +90,13 @@ if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
     if( CMAKE_CXX_COMPILER_VERSION VERSION_LESS 6.0 )
         target_compile_options( ${LIB_TARGET} PRIVATE -Wno-missing-braces -Wmissing-field-initializers )
     endif()
+    if(
+        MSVC AND
+        CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 19 AND
+        CMAKE_CXX_COMPILER_VERSION VERSION_LESS 21
+    )
+        target_compile_options( ${LIB_TARGET} PRIVATE -Wno-cast-function-type )
+    endif()
 endif()
 
 if( APPLE )
@@ -97,12 +106,14 @@ endif()
 
 # Extra warning flags for GCC
 if( CMAKE_CXX_COMPILER_ID MATCHES "GNU" )
-    target_compile_options( ${LIB_TARGET} PRIVATE -Wshadow -Wcast-align -Wunused
+    target_compile_options( ${LIB_TARGET} PRIVATE -Wshadow -Wcast-align -Wunused -Wtrampolines
                             -Woverloaded-virtual -Wformat=2 -Wdouble-promotion -Wlogical-op )
-    if( NOT MINGW AND BIT7Z_USE_VIRTUAL_DESTRUCTOR_IN_IUNKNOWN )
+    if( NOT MINGW AND BIT7Z_USE_LEGACY_IUNKNOWN )
         target_compile_options( ${LIB_TARGET} PRIVATE -Wnon-virtual-dtor )
     endif()
     if( MINGW )
+        # We need compatibility with Vista and later, as we use FILE_ATTRIBUTE_TAG_INFO/GetFileInformationByHandleEx.
+        target_compile_definitions( ${LIB_TARGET} PRIVATE WINVER=0x0600 _WIN32_WINNT=0x600 )
         # Some versions of MinGW might complain that the library is too big when linking to it.
         # Using -Wa,-mbig-obj fixes the linking error.
         # (https://digitalkarabela.com/mingw-w64-how-to-fix-file-too-big-too-many-sections/).

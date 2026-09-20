@@ -3,27 +3,30 @@
 
 /*
  * bit7z - A C++ static library to interface with the 7-zip shared libraries.
- * Copyright (c) 2014-2022 Riccardo Ostani - All Rights Reserved.
+ * Copyright (c) Riccardo Ostani - All Rights Reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
-#ifdef _WIN32
-#define NOMINMAX
-#endif
 
 #include <catch2/catch.hpp>
 
 #include <bit7z/bitpropvariant.hpp>
+#include <bit7z/bittypes.hpp>
+#include <bit7z/bitwindows.hpp>
 #ifndef _WIN32
 #include <internal/windows.hpp> // for VT_ enum constants
 #endif
 
-#include <map>
-#include <limits>
-#include <sstream>
+#include <cstdint>
 #include <cstring>
+#include <cwchar>
+#include <limits>
+#include <ios>
+#include <sstream>
+#include <type_traits>
+#include <utility>
 
 //-V::530,2008,2563,2608,3555 (Suppressing warnings in PVS-Studio)
 
@@ -305,10 +308,10 @@ TEST_CASE( "BitPropVariant: String variant", "[BitPropVariant][string]" ) {
     REQUIRE( propVariant.bstrVal == nullptr );
 }
 
-template< typename T, size_t S >
+template< typename T, std::size_t S >
 using is_unsigned_with_size = std::integral_constant< bool, std::is_unsigned< T >::value && S == sizeof( T ) >;
 
-template< typename T, size_t S >
+template< typename T, std::size_t S >
 using is_signed_with_size = std::integral_constant< bool, std::is_signed< T >::value && S == sizeof( T ) >;
 
 template< typename T, typename std::enable_if< is_unsigned_with_size< T, 1 >::value >::type* = nullptr >
@@ -385,7 +388,7 @@ auto variant_type() -> BitPropVariantType {
     if ( is_signed_with_size< T, 8 >::value ) {
         return BitPropVariantType::Int64;
     }
-    // Should not happen in the tests in which we use this function!
+    // Should not happen in the tests in which we use this function.
     return BitPropVariantType::Empty;
 }
 
@@ -419,21 +422,21 @@ auto get_value( const BitPropVariant& variant ) -> T {
 }
 
 // BitPropVariant's toString uses std::to_string so here we use another way to convert integers to string
-auto uint_to_tstring( uint64_t value ) -> tstring {
+auto uint_to_tstring( std::uint64_t value ) -> tstring {
 #if defined( _WIN32 ) && defined( BIT7Z_USE_NATIVE_STRING )
     std::wstringstream stream;
 #else
     std::stringstream stream;
 #endif
-    stream << std::dec << uint64_t{ value };
+    stream << std::dec << std::uint64_t{ value };
     return stream.str();
 }
 
 TEMPLATE_TEST_CASE( "BitPropVariant: Unsigned integer variant", "[BitPropVariant][unsigned]",
-                    uint8_t, uint16_t, uint32_t, uint64_t ) {
+                    std::uint8_t, std::uint16_t, std::uint32_t, std::uint64_t ) {
     BitPropVariant propVariant;
 
-    TestType value = GENERATE( 0, 42, std::numeric_limits< TestType >::max() );
+    TestType value = GENERATE( as< TestType >(), 0, 42, std::numeric_limits< TestType >::max() );
 
     SECTION( "Using the unsigned integer constructor" ) {
         propVariant = BitPropVariant( value );
@@ -448,7 +451,7 @@ TEMPLATE_TEST_CASE( "BitPropVariant: Unsigned integer variant", "[BitPropVariant
     }
 
     SECTION( "Double assignment" ) {
-        propVariant = static_cast< uint64_t >( 84ull ); // NOLINT(*-magic-numbers)
+        propVariant = static_cast< std::uint64_t >( 84ull ); // NOLINT(*-magic-numbers)
         REQUIRE( propVariant.getUInt64() == 84ull );
         propVariant = value;
     }
@@ -507,18 +510,18 @@ TEMPLATE_TEST_CASE( "BitPropVariant: Unsigned integer variant", "[BitPropVariant
     REQUIRE( propVariant.isEmpty() );
 }
 
-auto int_to_tstring( int64_t value ) -> tstring {
+auto int_to_tstring( std::int64_t value ) -> tstring {
 #if defined( _WIN32 ) && defined( BIT7Z_USE_NATIVE_STRING )
     std::wstringstream stream;
 #else
     std::stringstream stream;
 #endif
-    stream << std::dec << int64_t{ value };
+    stream << std::dec << std::int64_t{ value };
     return stream.str();
 }
 
 TEMPLATE_TEST_CASE( "BitPropVariant: Integer variant", "[BitPropVariant][signed]",
-                    int8_t, int16_t, int32_t, int64_t ) {
+                    std::int8_t, std::int16_t, std::int32_t, std::int64_t ) {
     BitPropVariant propVariant;
 
     TestType value = GENERATE( std::numeric_limits< TestType >::min(),
@@ -540,7 +543,7 @@ TEMPLATE_TEST_CASE( "BitPropVariant: Integer variant", "[BitPropVariant][signed]
     }
 
     SECTION( "Double assignment" ) {
-        propVariant = static_cast< uint64_t >( 84ull ); // NOLINT(*-magic-numbers)
+        propVariant = static_cast< std::uint64_t >( 84ull ); // NOLINT(*-magic-numbers)
         REQUIRE( propVariant.getUInt64() == 84ull );
         propVariant = value;
     }
@@ -619,7 +622,7 @@ TEST_CASE( "BitPropVariant: FILETIME variant", "[BitPropVariant][FILETIME]" ) {
     }
 
     SECTION( "Double assignment" ) {
-        propVariant = static_cast< uint64_t >( 84ull ); // NOLINT(*-magic-numbers)
+        propVariant = static_cast< std::uint64_t >( 84ull ); // NOLINT(*-magic-numbers)
         REQUIRE( propVariant.getUInt64() == 84ull );
         propVariant = value;
     }
@@ -663,26 +666,26 @@ TEST_CASE( "BitPropVariant: Moving string variants", "[BitPropVariant][copy]" ) 
 
     SECTION( "Move constructor" ) {
         // The move may invalidate propvariant.bstrVal (make it nullptr), so we copy the pointer
-        // and check the moved variant uses the same pointer!
+        // and check the moved variant uses the same pointer.
         BSTR testBstrVal = propVariant.bstrVal;
         const BitPropVariant moveVar( std::move( propVariant ) );
         REQUIRE( !moveVar.isEmpty() );
         REQUIRE( moveVar.vt == VT_BSTR );
         REQUIRE( moveVar.bstrVal ==
-                 testBstrVal ); //moveVar should point to the same BSTR object of the original propVariant!
+                 testBstrVal ); //moveVar should point to the same BSTR object of the original propVariant.
         REQUIRE( moveVar.getString() == kTestTstring );
         REQUIRE( moveVar.getNativeString() == kTestNativeString );
     }
 
     SECTION( "Move assignment" ) {
         // The move may invalidate propvariant.bstrVal (make it nullptr), so we copy the pointer
-        // and check if the moved variant uses the same pointer!
+        // and check if the moved variant uses the same pointer.
         BSTR testBstrVal = propVariant.bstrVal; // NOLINT(bugprone-use-after-move)
         const BitPropVariant moveVar = std::move( propVariant ); // cppcheck-suppress accessMoved
         REQUIRE( !moveVar.isEmpty() );
         REQUIRE( moveVar.vt == VT_BSTR );
         REQUIRE( moveVar.bstrVal ==
-                 testBstrVal ); //moveVar should point to the same BSTR object of the original propVariant!
+                 testBstrVal ); //moveVar should point to the same BSTR object of the original propVariant.
         REQUIRE( moveVar.getString() == kTestTstring );
         REQUIRE( moveVar.getNativeString() == kTestNativeString );
     }
@@ -743,7 +746,7 @@ TEST_CASE( "BitPropVariant: Equality operator", "[bitpropvariant][equality]" ) {
         SECTION( "Integers with different signedness" ) {
             first = 42; // NOLINT(*-magic-numbers)
             second = 42u; // NOLINT(*-magic-numbers)
-            //unsigned 42 (second) is different from first signed 42 (first)!
+            //unsigned 42 (second) is different from signed 42 (first).
         }
 
         SECTION( "Different booleans (1)" ) {

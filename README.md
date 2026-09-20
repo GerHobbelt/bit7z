@@ -230,7 +230,6 @@ The newest bit7z v4 introduced some significant breaking changes to the library'
 + The old `BitArchiveInfo` class is now called `BitArchiveReader`, and it allows to extract single archives.
 + The `ProgressCallback` now must return a `bool` value indicating whether the current operation can continue (`true`) or not (`false`).
 + The `BitException` class now inherits from `std::system_error` rather than `std::runtime_error`.
-
   + The method `BitException::getErrorCode()` was renamed `BitException::hresultCode()`.
 + The project structure changed:
   + Public API headers moved from `include/` to the `include/bit7z/` folder, so `#include` directives now need to prepend `bit7z/` to the included header name (e.g., `#include <bit7z/bitfileextractor.hpp>`).
@@ -351,6 +350,7 @@ If you plan to use the `7z.so` from p7zip or 7-Zip v22.01 and earlier instead, y
 
 <details>
   <summary>Expand for more details</summary>
+
 _On Linux and macOS_, 7-Zip v23.01 introduced breaking changes to the IUnknown interface.
 As a result, if you build bit7z for such a version of 7-Zip (the default), it will not support using the shared libraries from previous versions of 7-Zip (or from p7zip).
 Conversely, bit7z made for earlier versions of 7-Zip or for p7zip is incompatible with the shared libraries from 7-Zip v23.01 and later.

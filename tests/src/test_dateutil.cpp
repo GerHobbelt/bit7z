@@ -3,7 +3,7 @@
 
 /*
  * bit7z - A C++ static library to interface with the 7-zip shared libraries.
- * Copyright (c) 2014-2022 Riccardo Ostani - All Rights Reserved.
+ * Copyright (c) Riccardo Ostani - All Rights Reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -13,11 +13,11 @@
 #include <catch2/catch.hpp>
 
 #ifndef _WIN32
+#include "utils/archive.hpp"
 #include "utils/datetime.hpp"
 #include "utils/shared_lib.hpp"
 
 #include <bit7z/bitarchivereader.hpp>
-#include <internal/stringutil.hpp>
 #endif
 
 #include <internal/dateutil.hpp>
@@ -56,7 +56,7 @@ TEST_CASE( "fsutil: Date conversions", "[fsutil][date functions]" ) {
     DYNAMIC_SECTION( "Date: " << testDate.name ) {
 #ifndef _WIN32
         SECTION( "From std::time_t to FILETIME" ) {
-            auto result = time_to_FILETIME( testDate.dateTime );
+            auto result = toFILETIME( testDate.dateTime );
             REQUIRE( result.dwHighDateTime == testDate.fileTime.dwHighDateTime );
             REQUIRE( result.dwLowDateTime == testDate.fileTime.dwLowDateTime );
         }
@@ -64,17 +64,45 @@ TEST_CASE( "fsutil: Date conversions", "[fsutil][date functions]" ) {
 
 #ifndef _WIN32
         SECTION( "From FILETIME to std::filesystem::file_time_type" ) {
-            auto result = FILETIME_to_file_time_type( testDate.fileTime );
+            auto result = toFileTimeType( testDate.fileTime );
             REQUIRE( as_unix_timestamp( result ) == testDate.dateTime );
         }
 #endif
 
         SECTION( "From FILETIME to bit7z::time_type" ) {
-            auto result = FILETIME_to_time_type( testDate.fileTime );
-            auto output = bit7z::time_type::clock::to_time_t( result );
+            const auto result = toTimeType( testDate.fileTime );
+            const auto output = bit7z::time_type::clock::to_time_t( result );
             REQUIRE( output == testDate.dateTime );
         }
+
+        SECTION( "From bit7z::time_type to FILETIME" ) {
+            const auto input = bit7z::time_type::clock::from_time_t( testDate.dateTime );
+            const auto result = toFILETIME( input );
+            REQUIRE( result.dwHighDateTime == testDate.fileTime.dwHighDateTime );
+            REQUIRE( result.dwLowDateTime == testDate.fileTime.dwLowDateTime );
+        }
+
+        SECTION( "Round-trip: FILETIME with sub-second precision -> bit7z::time_type -> FILETIME" ) {
+            // 1000000 × 100ns = 100ms; a multiple of 10 to remain lossless on microseconds-resolution clocks.
+            FILETIME original = testDate.fileTime;
+            original.dwLowDateTime += 1000000; // NOLINT(*-magic-numbers)
+
+            const auto asTimeType = toTimeType( original );
+            const auto result = toFILETIME( asTimeType );
+            REQUIRE( result.dwHighDateTime == original.dwHighDateTime );
+            REQUIRE( result.dwLowDateTime == original.dwLowDateTime );
+        }
     }
+}
+
+TEST_CASE( "fsutil: FILETIME_to_time_type clamps out-of-range FILETIMEs", "[fsutil][date functions]" ) {
+    // FILETIME{0, 0} is the NT epoch (1601-01-01), which predates the Unix epoch by ~369 years.
+    // On nanosecond-precision clocks (e.g., Linux), converting it would overflow signed 64-bit arithmetic;
+    // the function must clamp to time_type::min() rather than invoking UB.
+    // On 100ns-precision clocks (e.g., Windows), no overflow occurs and the exact date is returned.
+    // In both cases the result must be strictly before the Unix epoch.
+    const auto result = toTimeType( FILETIME{ 0, 0 } );
+    REQUIRE( result < time_type::clock::from_time_t( 0 ) );
 }
 
 #ifndef _WIN32
@@ -86,32 +114,34 @@ TEST_CASE( "fsutil: Date conversion of current time should preserve information 
 
     // Converting the current time to FILETIME
     const auto asTimeT = std::chrono::system_clock::to_time_t( currentTime );
-    const auto asFileTime = time_to_FILETIME( asTimeT );
+    const auto asFileTime = toFILETIME( asTimeT );
 
     SECTION( "Converting current FILETIME to a system_clock's time_point" ) {
-        const auto asSystemTimePoint = FILETIME_to_time_type( asFileTime );
+        const auto asSystemTimePoint = toTimeType( asFileTime );
         REQUIRE( unixTimestamp == as_unix_timestamp( asSystemTimePoint ) );
     }
 
     SECTION( "Converting current FILETIME to a file_clock's time_point" ) {
-        const auto asFileTimePoint = FILETIME_to_file_time_type( asFileTime );
+        const auto asFileTimePoint = toFileTimeType( asFileTime );
         REQUIRE( unixTimestamp == as_unix_timestamp( asFileTimePoint ) );
     }
 }
 
-TEST_CASE( "fsutil: Date conversion of last write time", "[fsutil][date functions]" ) {
+TEMPLATE_TEST_CASE( "fsutil: Date conversion of last write time", "[fsutil][date functions]",
+                    tstring, buffer_t, stream_t ) {
     const TestDirectory testDir{ fs::path{ test_archives_dir } / "extraction" / "single_file" };
 
     const auto arcFileName = fs::path{ clouds.name }.concat( ".7z" );
 
-    const Bit7zLibrary lib{ test::sevenzip_lib_path() };
-    BitArchiveReader info( lib, path_to_tstring( arcFileName ), BitFormat::SevenZip );
+    TestType inputArchive{};
+    getInputArchive( arcFileName, inputArchive );
+    BitArchiveReader info( test::sevenzip_lib(), inputArchive, BitFormat::SevenZip );
 
     const auto item = info.itemAt( 0 );
 
     const auto lastWriteTime = item.itemProperty( BitProperty::MTime ).getFileTime();
     INFO( "Last write time FILETIME: {" << lastWriteTime.dwHighDateTime << ", " << lastWriteTime.dwLowDateTime << "}")
-    const auto result = FILETIME_to_file_time_type( lastWriteTime );
+    const auto result = toFileTimeType( lastWriteTime );
 
     const auto result_as_timestamp = as_unix_timestamp( result );
     INFO( "Last write file time_point: " << result_as_timestamp )

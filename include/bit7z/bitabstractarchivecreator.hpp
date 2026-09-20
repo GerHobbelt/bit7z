@@ -1,6 +1,6 @@
 /*
  * bit7z - A C++ static library to interface with the 7-zip shared libraries.
- * Copyright (c) 2014-2023 Riccardo Ostani - All Rights Reserved.
+ * Copyright (c) Riccardo Ostani - All Rights Reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -10,21 +10,26 @@
 #ifndef BITABSTRACTARCHIVECREATOR_HPP
 #define BITABSTRACTARCHIVECREATOR_HPP
 
-#include <map>
-#include <memory>
-
+#include "bit7zlibrary.hpp"
 #include "bitabstractarchivehandler.hpp"
 #include "bitcompressionlevel.hpp"
 #include "bitcompressionmethod.hpp"
+#include "bitdefines.hpp"
 #include "bitformat.hpp"
 #include "bitinputarchive.hpp"
+#include "bitpropvariant.hpp"
+#include "bittypes.hpp"
+
+#include <cstddef>
+#include <cstdint>
+#include <map>
+#include <string>
+#include <type_traits>
 
 struct IOutStream;
 struct ISequentialOutStream;
 
 namespace bit7z {
-
-using std::ostream;
 
 class ArchiveProperties;
 
@@ -32,10 +37,10 @@ class ArchiveProperties;
  * @brief Enumeration representing how an archive creator should deal when the output archive already exists.
  */
 enum struct UpdateMode {
-    None, ///< The creator will throw an exception (unless the OverwriteMode is not None).
+    None,   ///< The creator will throw an exception (unless the OverwriteMode is not None).
     Append, ///< The creator will append the new items to the existing archive.
     Update, ///< New items whose path already exists in the archive will overwrite the old ones, other will be appended.
-    BIT7Z_DEPRECATED_ENUMERATOR( Overwrite, Update, "Since v4.0; please use the UpdateMode::Update enumerator." ) ///< @deprecated since v4.0; please use the UpdateMode::Update enumerator.
+    BIT7Z_DEPRECATED_ENUMERATOR( Overwrite, Update, "Since v4.0. Please use the UpdateMode::Update enumerator." ) ///< @deprecated since v4.0; please use the UpdateMode::Update enumerator.
 };
 
 /**
@@ -81,12 +86,12 @@ class BitAbstractArchiveCreator : public BitAbstractArchiveHandler {
         /**
          * @return the dictionary size used for creating/updating an archive.
          */
-        BIT7Z_NODISCARD auto dictionarySize() const noexcept -> uint32_t;
+        BIT7Z_NODISCARD auto dictionarySize() const noexcept -> std::uint32_t;
 
         /**
          * @return the word size used for creating/updating an archive.
          */
-        BIT7Z_NODISCARD auto wordSize() const noexcept -> uint32_t;
+        BIT7Z_NODISCARD auto wordSize() const noexcept -> std::uint32_t;
 
         /**
          * @return whether the archive creator uses solid compression or not.
@@ -100,20 +105,35 @@ class BitAbstractArchiveCreator : public BitAbstractArchiveHandler {
 
         /**
          * @return the volume size (in bytes) used when creating multi-volume archives
-         *         (a 0 value means that all files are going in a single archive).
+         *         (a zero value means that all files are going in a single archive).
          */
-        BIT7Z_NODISCARD auto volumeSize() const noexcept -> uint64_t;
+        BIT7Z_NODISCARD auto volumeSize() const noexcept -> std::uint64_t;
 
         /**
          * @return the number of threads used when creating/updating an archive
-         *         (a 0 value means that it will use the 7-zip default value).
+         *         (a zero value means that it will use the 7-zip default value).
          */
-        BIT7Z_NODISCARD auto threadsCount() const noexcept -> uint32_t;
+        BIT7Z_NODISCARD auto threadsCount() const noexcept -> std::uint32_t;
 
         /**
          * @return whether the archive creator stores symbolic links as links in the output archive.
          */
         BIT7Z_NODISCARD auto storeSymbolicLinks() const noexcept -> bool;
+
+        /**
+         * @return true if the creator has been explicitly configured to store last write timestamps of items.
+         */
+        BIT7Z_NODISCARD auto storeLastWriteTime() const noexcept -> bool;
+
+        /**
+         * @return true if the creator has been explicitly configured to store creation timestamps of items.
+         */
+        BIT7Z_NODISCARD auto storeCreationTime() const noexcept -> bool;
+
+        /**
+         * @return true if the creator has been explicitly configured to store last access timestamps of items.
+         */
+        BIT7Z_NODISCARD auto storeLastAccessTime() const noexcept -> bool;
 
         /**
          * @brief Sets up a password for the output archives.
@@ -178,14 +198,14 @@ class BitAbstractArchiveCreator : public BitAbstractArchiveHandler {
          *
          * @param dictionarySize the dictionary size desired.
          */
-        void setDictionarySize( uint32_t dictionarySize );
+        void setDictionarySize( std::uint32_t dictionarySize );
 
         /**
          * @brief Sets the word size to be used when creating/updating an archive.
          *
          * @param wordSize the word size desired.
          */
-        void setWordSize( uint32_t wordSize );
+        void setWordSize( std::uint32_t wordSize );
 
         /**
          * @brief Sets whether to use solid compression or not.
@@ -210,14 +230,14 @@ class BitAbstractArchiveCreator : public BitAbstractArchiveHandler {
         /**
          * @brief Sets whether the creator can update existing archives or not.
          *
-         * @deprecated since v4.0; it is provided just for an easier transition from the old v3 API.
+         * @deprecated since v4.0. It is provided just for an easier transition from the old v3 API.
          *
          * @note If set to false, a subsequent compression operation may throw an exception
          *       if it targets an existing archive.
          *
          * @param canUpdate if true, compressing operations will update existing archives.
          */
-        BIT7Z_DEPRECATED_MSG( "Since v4.0; please use the overloaded function that takes an UpdateMode enumerator." )
+        BIT7Z_DEPRECATED_MSG( "Since v4.0. Please use the overloaded function that takes an UpdateMode enumerator." )
         void setUpdateMode( bool canUpdate );
 
         /**
@@ -227,14 +247,14 @@ class BitAbstractArchiveCreator : public BitAbstractArchiveHandler {
          *
          * @param volumeSize    The dimension of a volume.
          */
-        void setVolumeSize( uint64_t volumeSize ) noexcept;
+        void setVolumeSize( std::uint64_t volumeSize ) noexcept;
 
         /**
          * @brief Sets the number of threads to be used when creating/updating an archive.
          *
          * @param threadsCount the number of threads desired.
          */
-        void setThreadsCount( uint32_t threadsCount ) noexcept;
+        void setThreadsCount( std::uint32_t threadsCount ) noexcept;
 
         /**
          * @brief Sets whether the creator will store symbolic links as links in the output archive.
@@ -242,6 +262,29 @@ class BitAbstractArchiveCreator : public BitAbstractArchiveHandler {
          * @param storeSymlinks    if true, symbolic links will be stored as links.
          */
         void setStoreSymbolicLinks( bool storeSymlinks ) noexcept;
+
+        /**
+         * @brief Sets whether the creator will store last write timestamps of items.
+         *
+         * @note By default, all archive formats store last write timestamps; pass false to suppress them.
+         *
+         * @param storeLastWriteTime if false, last write timestamps will be omitted from the output archive.
+         */
+        void setStoreLastWriteTime( bool storeLastWriteTime ) noexcept;
+
+        /**
+         * @brief Sets whether the creator will store creation timestamps of items.
+         *
+         * @param storeCreationTime if true, creation timestamps of items will be stored in the output archive.
+         */
+        void setStoreCreationTime( bool storeCreationTime ) noexcept;
+
+        /**
+         * @brief Sets whether the creator will store last access timestamps of items.
+         *
+         * @param storeLastAccessTime if true, last access timestamps of items will be stored in the output archive.
+         */
+        void setStoreLastAccessTime( bool storeLastAccessTime ) noexcept;
 
         /**
          * @brief Sets a property for the output archive format as described by the 7-zip documentation
@@ -253,7 +296,7 @@ class BitAbstractArchiveCreator : public BitAbstractArchiveHandler {
          * @param value The value to be used for the property.
          */
         template< std::size_t N, typename T, typename = typename std::enable_if< std::is_integral< T >::value >::type >
-        void setFormatProperty( const wchar_t (&name)[N], T value ) noexcept { // NOLINT(*-avoid-c-arrays)
+        void setFormatProperty( const wchar_t (&name)[ N ], T value ) noexcept { // NOLINT(*-avoid-c-arrays)
             mExtraProperties[ name ] = value;
         }
 
@@ -270,15 +313,17 @@ class BitAbstractArchiveCreator : public BitAbstractArchiveHandler {
          * @param value The value to be used for the property.
          */
         template< std::size_t N, typename T, typename = typename std::enable_if< !std::is_integral< T >::value >::type >
-        void setFormatProperty( const wchar_t (&name)[N], const T& value ) noexcept { // NOLINT(*-avoid-c-arrays)
+        void setFormatProperty( const wchar_t (&name)[ N ], const T& value ) noexcept { // NOLINT(*-avoid-c-arrays)
             mExtraProperties[ name ] = value;
         }
 
     protected:
-        BitAbstractArchiveCreator( const Bit7zLibrary& lib,
-                                   const BitInOutFormat& format,
-                                   tstring password = {},
-                                   UpdateMode updateMode = UpdateMode::None );
+        BitAbstractArchiveCreator(
+            const Bit7zLibrary& lib,
+            const BitInOutFormat& format,
+            tstring password = {},
+            UpdateMode updateMode = UpdateMode::None
+        );
 
         BIT7Z_NODISCARD auto archiveProperties() const -> ArchiveProperties;
 
@@ -290,16 +335,16 @@ class BitAbstractArchiveCreator : public BitAbstractArchiveHandler {
         UpdateMode mUpdateMode;
         BitCompressionLevel mCompressionLevel;
         BitCompressionMethod mCompressionMethod;
-        uint32_t mDictionarySize;
-        uint32_t mWordSize;
+        std::uint32_t mDictionarySize;
+        std::uint32_t mWordSize;
         bool mCryptHeaders;
         bool mSolidMode;
-        uint64_t mVolumeSize;
-        uint32_t mThreadsCount;
+        std::uint64_t mVolumeSize;
+        std::uint32_t mThreadsCount;
         bool mStoreSymbolicLinks;
         std::map< std::wstring, BitPropVariant > mExtraProperties;
 };
 
-}  // namespace bit7z
+} // namespace bit7z
 
 #endif // BITABSTRACTARCHIVECREATOR_HPP
