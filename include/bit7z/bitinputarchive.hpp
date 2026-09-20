@@ -38,6 +38,7 @@ namespace bit7z {
 
 class BufferQueue;
 class ExtractCallback;
+class OpenCallback;
 
 /**
  * @brief Offset from where the archive starts within the input file.
@@ -48,6 +49,9 @@ enum struct ArchiveStartOffset : std::uint8_t {
     FileStart ///< Check only the file start for the archive's start.
 };
 
+/**
+ * @brief Policy controlling how a folder's path is reflected in the extracted items' paths.
+ */
 enum struct FolderPathPolicy : std::uint8_t {
     Strip,      ///< Remove the folder path from the extracted path.
     KeepName,   ///< Preserve the folder name in the extracted path.
@@ -711,6 +715,15 @@ class BitInputArchive {
             IInStream* inStream,
             ArchiveStartOffset startOffset
         ) -> IInArchive*;
+
+#ifdef BIT7Z_AUTO_FORMAT
+        BIT7Z_NODISCARD
+        auto tryOpenSfxArchive(
+            IInStream* inStream,
+            OpenCallback* openCallback,
+            const bit7zfs::path& name
+        ) -> IInArchive*;
+#endif
 
         void testArchive( BitIndicesView indices ) const;
 

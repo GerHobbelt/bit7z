@@ -57,101 +57,193 @@ using namespace NArchive;
 
 namespace bit7z {
 
+namespace {
+void allowTailData( IInArchive* inArchive ) noexcept {
+    CMyComPtr< IArchiveAllowTail > allowTail;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    ( void )inArchive->QueryInterface( bit7z::IID_IArchiveAllowTail, reinterpret_cast< void** >( &allowTail ) );
+    if ( allowTail != nullptr ) {
+        ( void )allowTail->AllowTail( 1 );
+    }
+}
+
+#ifdef BIT7Z_AUTO_FORMAT
+// Executable formats that 7-Zip opens strictly (no appended data) unless IArchiveAllowTail is enabled.
+BIT7Z_NODISCARD
+auto isExecutableFormat( const BitInFormat& format ) noexcept -> bool {
+    return format == BitFormat::Pe || format == BitFormat::Elf || format == BitFormat::Macho || format == BitFormat::TE;
+}
+#endif
+
+BIT7Z_NODISCARD
+auto openInputArchive(
+    IInArchive* inArchive,
+    IInStream* inStream,
+    ArchiveStartOffset startOffset,
+    OpenCallback* openCallback
+) noexcept -> HRESULT {
+    // Making the executable format handlers (PE, TE, ELF, Mach-O) accept files
+    // with data appended after the executable image (e.g., SFX archives), like 7-Zip does.
+    allowTailData( inArchive );
+
+    if ( startOffset == ArchiveStartOffset::FileStart ) {
+        static constexpr UInt64 maxCheckStartPosition = 0;
+        return inArchive->Open( inStream, &maxCheckStartPosition, openCallback );
+    }
+    return inArchive->Open( inStream, nullptr, openCallback );
+}
+
+BIT7Z_NODISCARD
+auto makeOpenError( const OpenCallback* openCallback, IInArchive* inArchive, HRESULT res ) -> std::error_code {
+    if ( openCallback->passwordWasAsked() ) {
+        return make_error_code( OperationResult::OpenErrorEncrypted );
+    }
+
+    BitPropVariant errorFlagsProp;
+    ( void )inArchive->GetArchiveProperty( static_cast< PROPID >( BitProperty::ErrorFlags ), &errorFlagsProp );
+    if ( errorFlagsProp.isUInt32() ) {
+        const auto errorFlags = errorFlagsProp.getUInt32();
+        if ( errorFlags != 0 ) {
+            return make_open_error_code( errorFlags );
+        }
+    }
+    if ( res == S_FALSE ) {
+        // 7-Zip reported no specific error flags. An S_FALSE result means the handler couldn't
+        // open the stream as the requested format (wrong format, or corrupted/truncated data)
+        // but set no flag (e.g., the Pe handler rejecting trailing data). We report it as IsNotArc
+        // instead of the opaque raw HRESULT (S_FALSE == 1).
+        return make_error_code( OpenError::IsNotArc );
+    }
+    return make_hresult_code( res );
+}
+} // namespace
+
+#ifdef BIT7Z_AUTO_FORMAT
+/* Tries opening the stream as one of the archive formats commonly embedded in SFX executables.
+ * On success, sets mDetectedFormat and returns the opened archive; returns nullptr otherwise. */
+auto BitInputArchive::tryOpenSfxArchive(
+    IInStream* inStream,
+    OpenCallback* openCallback,
+    const fs::path& name
+) -> IInArchive* {
+    // Note: Zip must be the last candidate, as its handler matches any PK record within the search limit.
+    // Note 2: Cannot be constexpr on MSVC 2015.
+    // ReSharper disable once CppVariableCanBeMadeConstexpr
+    static const std::initializer_list< const BitInFormat* > kSfxFormats = {
+        &BitFormat::SevenZip, &BitFormat::Rar5, &BitFormat::Rar, &BitFormat::Cab, &BitFormat::Zip
+    };
+    // Limit within which the handlers search for the start of the embedded archive (like 7-Zip's scan limit).
+    static constexpr UInt64 kSfxSearchLimit = 1ULL << 23ULL; // 8 MiB
+
+    for ( const auto* sfxFormat : kSfxFormats ) {
+        CMyComPtr< IInArchive > sfxArchive;
+        try {
+            sfxArchive = mArchiveHandler.library().initInArchive( *sfxFormat );
+        } catch ( const BitException& ) {
+            continue; // The loaded 7-Zip library doesn't provide this format's handler.
+        }
+        inStream->Seek( 0, STREAM_SEEK_SET, nullptr );
+        if ( sfxArchive->Open( inStream, &kSfxSearchLimit, openCallback ) == S_OK ) {
+            mDetectedFormat = sfxFormat;
+            return sfxArchive.Detach();
+        }
+        if ( openCallback->passwordWasAsked() ) {
+            // The handler found an embedded archive but needs a password to open it: stop searching.
+            throw BitException(
+                "Could not open the archive",
+                make_error_code( OperationResult::OpenErrorEncrypted ),
+                pathToTstring( name )
+            );
+        }
+    }
+    inStream->Seek( 0, STREAM_SEEK_SET, nullptr );
+    return nullptr;
+}
+#endif
+
 auto BitInputArchive::openArchiveStream(
     const fs::path& name,
     IInStream* inStream,
     ArchiveStartOffset startOffset
 ) -> IInArchive* {
+    const auto openCallback = bit7z::make_com< OpenCallback >( mArchiveHandler, name );
+
 #ifdef BIT7Z_AUTO_FORMAT
     bool detectedBySignature = false;
     if ( *mDetectedFormat == BitFormat::Auto ) {
-        // Detecting the format of the input file
+        // Format detection from file extension didn't run, or it didn't find a match.
+        // Hence, we detect the format from the file signature.
         mDetectedFormat = &detectFormatFromSignature( inStream );
         detectedBySignature = true;
     }
-    CMyComPtr< IInArchive > inArchive = mArchiveHandler.library().initInArchive( *mDetectedFormat );
-#else
-    CMyComPtr< IInArchive > inArchive = mArchiveHandler.library().initInArchive( mArchiveHandler.format() );
-#endif
-    // NOTE: CMyComPtr is still needed: if an error occurs, and an exception is thrown,
-    // the IInArchive object is deleted automatically.
 
-#ifdef BIT7Z_AUTO_FORMAT
-    if ( mArchiveHandler.format() != BitFormat::Auto )
-#endif
-    {
-        /* The user explicitly requested the format, so executable formats (PE, TE, ELF, Mach-O) must accept
-         * files with data appended after the executable image (e.g., SFX archives), like 7-Zip does. */
-        CMyComPtr< IArchiveAllowTail > allowTail;
-        ( void )inArchive->QueryInterface( bit7z::IID_IArchiveAllowTail, reinterpret_cast< void** >( &allowTail ) );
-        if ( allowTail != nullptr ) {
-            ( void )allowTail->AllowTail( 1 );
+    // Here, a format was detected, either from the file extension, or from the file signature.
+    // If no format was detected from either, an exception would have been thrown after failing to detect
+    // the format from the signature.
+    if (
+        mArchiveHandler.format() == BitFormat::Auto &&
+        startOffset == ArchiveStartOffset::None &&
+        isExecutableFormat( *mDetectedFormat )
+    ) {
+        // Executable formats are what 7-Zip calls "pre-arc" formats: an embedded archive, if present,
+        // takes precedence over the executable containing it (e.g., SFX archives, installers).
+        IInArchive* sfxArchive = tryOpenSfxArchive( inStream, openCallback, name );
+        if ( sfxArchive != nullptr ) {
+            // Detected an embedded archive, i.e., the file is an SFX archive.
+            return sfxArchive;
         }
     }
 
-    // Creating open callback for the file
-    const auto openCallback = bit7z::make_com< OpenCallback >( mArchiveHandler, name );
-
-    // Trying to open the file with the detected format
-#ifndef BIT7Z_AUTO_FORMAT
-    const
-#endif
-    HRESULT res = [&]() -> HRESULT {
-        if ( startOffset == ArchiveStartOffset::FileStart ) {
-            constexpr UInt64 maxCheckStartPosition = 0;
-            return inArchive->Open( inStream, &maxCheckStartPosition, openCallback );
-        }
-        return inArchive->Open( inStream, nullptr, openCallback );
-    }();
-
+    // Note: CMyComPtr is still needed: if an error occurs and an exception is thrown,
+    // the IInArchive object is deleted automatically.
+    CMyComPtr< IInArchive > inArchive = mArchiveHandler.library().initInArchive( *mDetectedFormat );
+    HRESULT res = openInputArchive( inArchive, inStream, startOffset, openCallback );
     if ( res == S_OK ) {
         return inArchive.Detach();
     }
 
-#ifdef BIT7Z_AUTO_FORMAT
     if ( mArchiveHandler.format() == BitFormat::Auto && !detectedBySignature ) {
         /* User wanted auto-detection of the format, an extension was detected but opening failed, so we try a more
          * precise detection by checking the signature.
-         * NOTE: If user specified explicitly a format (i.e., not BitFormat::Auto), this check is not performed,
-         *       and an exception is thrown.
-         * NOTE 2: If signature detection was already performed (detectedBySignature == false), it detected
-         *         a wrong format, no further check can be done, and an exception must be thrown. */
+         * Note: if the user explicitly specified a format (i.e., not BitFormat::Auto), this check is not performed,
+         * and an exception is thrown.
+         * Note 2: if signature detection was already performed (detectedBySignature == true), it detected
+         * a wrong format (since the open failed), so no further check can be done, and an exception must be thrown. */
 
-        /* Opening the file might have changed the current file pointer, so we reset it to the beginning of the file
-         * to correctly read the file signature. */
+        // Opening the file might have changed the current file pointer, so we reset it to the beginning of the file
+        // to correctly read the file signature.
         inStream->Seek( 0, STREAM_SEEK_SET, nullptr );
         mDetectedFormat = &detectFormatFromSignature( inStream );
+        if ( startOffset == ArchiveStartOffset::None && isExecutableFormat( *mDetectedFormat ) ) {
+            // The extension pointed to a non-executable format, so the first SFX scan above was skipped.
+            // Now that the signature reveals an executable, we must scan here too: otherwise, an SFX archive
+            // with a misleading extension would be opened as its executable wrapper (e.g., Pe), losing access
+            // to the embedded archive.
+            IInArchive* sfxArchive = tryOpenSfxArchive( inStream, openCallback, name );
+            if ( sfxArchive != nullptr ) {
+                return sfxArchive;
+            }
+        }
         inArchive = mArchiveHandler.library().initInArchive( *mDetectedFormat );
-        res = inArchive->Open( inStream, nullptr, openCallback );
+        res = openInputArchive( inArchive, inStream, ArchiveStartOffset::None, openCallback );
         if ( res == S_OK ) {
             return inArchive.Detach();
         }
     }
+#else
+    // NOTE: CMyComPtr ensures the IInArchive is released if an exception is thrown.
+    CMyComPtr< IInArchive > inArchive = mArchiveHandler.library().initInArchive( mArchiveHandler.format() );
+    const HRESULT res = openInputArchive( inArchive, inStream, startOffset, openCallback );
+    if ( res == S_OK ) {
+        return inArchive.Detach();
+    }
 #endif
 
-    const auto error = [&]() -> std::error_code {
-        if ( openCallback->passwordWasAsked() ) {
-            return make_error_code( OperationResult::OpenErrorEncrypted );
-        }
-
-        BitPropVariant errorFlagsProp;
-        inArchive->GetArchiveProperty( static_cast< PROPID >( BitProperty::ErrorFlags ), &errorFlagsProp );
-        if ( errorFlagsProp.isUInt32() ) {
-            const auto errorFlags = errorFlagsProp.getUInt32();
-            if ( errorFlags != 0 ) {
-                return make_open_error_code( errorFlags );
-            }
-        }
-        if ( res == S_FALSE ) {
-            // 7-Zip reported no specific error flags. A S_FALSE result means the handler couldn't
-            // open the stream as the requested format (wrong format, or corrupted/truncated data)
-            // but set no flag (e.g., the Pe handler rejecting trailing data). We report it as IsNotArc
-            // instead of the opaque raw HRESULT (S_FALSE == 1).
-            return make_error_code( OpenError::IsNotArc );
-        }
-        return make_hresult_code( res );
-    }();
-    throw BitException( "Could not open the archive", error, pathToTstring( name ) );
+    throw BitException(
+        "Could not open the archive",
+        makeOpenError( openCallback, inArchive, res ),
+        pathToTstring( name )
+    );
 }
 
 namespace {
