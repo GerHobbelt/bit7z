@@ -27,14 +27,15 @@ using namespace bit7z::test::filesystem;
 // Note: in the following tests, we use BitArchiveReader for checking BitArchiveWriter's output archives.
 
 TEST_CASE( "BitOutputArchive: TODO", "[bitoutputarchive]" ) {
-    const BitArchiveWriter writer{ test::sevenzip_lib(), BitFormat::SevenZip };
+    const BitArchiveWriter writer{ test::sevenzipLib(), BitFormat::SevenZip };
     REQUIRE( writer.compressionFormat() == BitFormat::SevenZip ); // Just a placeholder test.
 }
 
 TEST_CASE( "BitOutputArchive: Creating a multi-volume archive", "[bitoutputarchive]" ) {
     const auto inputFile = fs::path{ test_filesystem_dir } / "folder" / "clouds.jpg";
 
-    const auto testFormat = GENERATE( as< TestOutputFormat >(),
+    const auto testFormat = GENERATE(
+        as< TestOutputFormat >(),
         TestOutputFormat{ "bz2", BitFormat::BZip2 },
         TestOutputFormat{ "gz", BitFormat::GZip },
         TestOutputFormat{ "7z", BitFormat::SevenZip },
@@ -45,7 +46,7 @@ TEST_CASE( "BitOutputArchive: Creating a multi-volume archive", "[bitoutputarchi
     );
 
     DYNAMIC_SECTION( "Archive format: " << testFormat.extension ) {
-        BitArchiveWriter writer( test::sevenzip_lib(), testFormat.format );
+        BitArchiveWriter writer( test::sevenzipLib(), testFormat.format );
         REQUIRE_NOTHROW( writer.addFile( to_tstring( inputFile ) ) );
 
         const TempTestDirectory testOutDir{ "test_bitoutputarchive" };
@@ -61,7 +62,7 @@ TEST_CASE( "BitOutputArchive: Creating a multi-volume archive", "[bitoutputarchi
         REQUIRE( fs::exists( outputArchive + BIT7Z_STRING( ".001" ) ) );
 
         {
-            const BitArchiveReader info{ test::sevenzip_lib(), firstVolume, testFormat.format };
+            const BitArchiveReader info{ test::sevenzipLib(), firstVolume, testFormat.format };
             REQUIRE_NOTHROW( info.test() );
 
             buffer_t fileBuffer;
@@ -80,10 +81,10 @@ TEST_CASE( "BitOutputArchive: Creating a multi-volume archive", "[bitoutputarchi
 TEST_CASE( "BitOutputArchive: Compressing a commented file should preserve the comment", "[bitoutputarchive]" ) {
     const auto commentedFile = fs::path{ test_archives_dir } / "metadata" / "file_comment" / "commented.jpg";
 
-    BitArchiveWriter writer( test::sevenzip_lib(), BitFormat::SevenZip );
+    BitArchiveWriter writer( test::sevenzipLib(), BitFormat::SevenZip );
     REQUIRE_NOTHROW( writer.addFile( to_tstring( commentedFile ) ) );
 
-    TempTestDirectory testOutDir{ "test_bitinputarchive" };
+    const TempTestDirectory testOutDir{ "test_bitinputarchive" };
     INFO( "Output directory: " << testOutDir )
 
     const auto* const outputArchive = BIT7Z_STRING( "commented.7z" );
@@ -91,18 +92,20 @@ TEST_CASE( "BitOutputArchive: Compressing a commented file should preserve the c
 
     REQUIRE( fs::exists( outputArchive ) );
 
-    BitArchiveReader info( test::sevenzip_lib(), outputArchive, BitFormat::SevenZip );
+    const BitArchiveReader info( test::sevenzipLib(), outputArchive, BitFormat::SevenZip );
     REQUIRE_NOTHROW( info.test() );
     REQUIRE_NOTHROW( info.extractTo( testOutDir ) );
 
     const auto expectedFile = testOutDir.path() / "commented.jpg";
     REQUIRE( fs::exists( expectedFile ) );
 
-    std::wstring comment = get_file_comment( expectedFile );
-    REQUIRE( comment == LR"({"data":{"pictureId":"738298be446d47f4b3933a4cc68ab6a2","appversion":"8.0.0",)"
-                        LR"("stickerId":"","filterId":"","infoStickerId":"","imageEffectId":"",)"
-                        LR"("playId":"","activityName":"","os":"android","product":"retouch"},)"
-                        LR"("source_type":"douyin_beauty_me"})" );
+    const std::wstring comment = getFileComment( expectedFile );
+    REQUIRE(
+        comment == LR"({"data":{"pictureId":"738298be446d47f4b3933a4cc68ab6a2","appversion":"8.0.0",)"
+        LR"("stickerId":"","filterId":"","infoStickerId":"","imageEffectId":"",)"
+        LR"("playId":"","activityName":"","os":"android","product":"retouch"},)"
+        LR"("source_type":"douyin_beauty_me"})"
+    );
     REQUIRE( fs::remove( expectedFile ) );
 }
 #endif
