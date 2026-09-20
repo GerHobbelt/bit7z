@@ -85,7 +85,7 @@ using FilterCallback = std::function< FilterResult( const BitArchiveItem& ) >;
 /**
  * @brief Enumeration representing how a handler should deal when an output file already exists.
  */
-enum struct OverwriteMode {
+enum struct OverwriteMode : std::uint8_t {
     None = 0,  ///< The handler will throw an exception if the output file or buffer already exists.
     Overwrite, ///< The handler will overwrite the old file or buffer with the new one.
     Skip,      ///< The handler will skip writing to the output file or buffer.
@@ -146,27 +146,27 @@ class BitAbstractArchiveHandler {
         /**
          * @return the current total callback.
          */
-        BIT7Z_NODISCARD auto totalCallback() const -> TotalCallback;
+        BIT7Z_NODISCARD auto totalCallback() const -> const TotalCallback&;
 
         /**
          * @return the current progress callback.
          */
-        BIT7Z_NODISCARD auto progressCallback() const -> ProgressCallback;
+        BIT7Z_NODISCARD auto progressCallback() const -> const ProgressCallback&;
 
         /**
          * @return the current ratio callback.
          */
-        BIT7Z_NODISCARD auto ratioCallback() const -> RatioCallback;
+        BIT7Z_NODISCARD auto ratioCallback() const -> const RatioCallback&;
 
         /**
          * @return the current file callback.
          */
-        BIT7Z_NODISCARD auto fileCallback() const -> FileCallback;
+        BIT7Z_NODISCARD auto fileCallback() const -> const FileCallback&;
 
         /**
          * @return the current password callback.
          */
-        BIT7Z_NODISCARD auto passwordCallback() const -> PasswordCallback;
+        BIT7Z_NODISCARD auto passwordCallback() const -> const PasswordCallback&;
 
         /**
          * @return the current OverwriteMode.
